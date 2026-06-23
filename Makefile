@@ -1,4 +1,3 @@
-SRC_DIR = src
 
 # Colors
 COLOR_RESET = \033[0m
@@ -15,7 +14,7 @@ install:
 
 run:
 	@printf "$(COLOR_CYAN)Starting simulation with ia$(COLOR_RESET)\n"
-	@uv run python $(SRC_DIR)/main.py
+	@
 
 debug:
 	@printf "$(COLOR_YELLOW)========================================================$(COLOR_RESET)\n"
