@@ -270,9 +270,15 @@ def collect_files(repo_path: str) -> Generator[Path, None, None]:
         Chemins de fichiers supportés.
     """
     root = Path(repo_path)
+    if not root.exists():
+        raise FileNotFoundError(
+            f"Le chemin '{root.resolve()}' n'existe pas. "
+            f"As-tu bien cloné le dépôt ? (git clone https://github.com/vllm-project/vllm.git)"
+        )
     if not root.is_dir():
-        raise NotADirectoryError(f"Le chemin '{repo_path}' n'est pas un répertoire valide.")
-
+        raise NotADirectoryError(
+            f"Le chemin '{root.resolve()}' existe mais n'est pas un répertoire."
+        )
     for dirpath, dirnames, filenames in os.walk(root):
         # Exclure les dossiers cachés et les environnements virtuels courants
         _excluded = {"__pycache__", ".git", "node_modules", ".venv", "venv"}

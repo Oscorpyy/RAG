@@ -14,7 +14,7 @@ install:
 
 run:
 	@printf "$(COLOR_CYAN)Starting simulation with ia$(COLOR_RESET)\n"
-	@
+	@uv run python -m src index --repo_path=./vllm --max_chunk_size=2000
 
 debug:
 	@printf "$(COLOR_YELLOW)========================================================$(COLOR_RESET)\n"
