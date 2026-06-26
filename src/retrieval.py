@@ -24,7 +24,7 @@ import fire
 from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 
-from models import (
+from .models import (
     MinimalSource,
     SearchResult,
     StudentSearchResults,
