@@ -12,30 +12,52 @@ install:
 	@uv sync
 	@printf "$(COLOR_GREEN)Installation completed$(COLOR_RESET)\n"
 
+run:
+	@printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"
+	@printf "$(COLOR_MAGENTA)Starting complete pipeline$(COLOR_RESET)\n"
+	@printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"
+
+	@printf "\n$(COLOR_CYAN)▶ Launching indexing...$(COLOR_RESET)\n"
+	@$(MAKE) index
+
+	@printf "\n$(COLOR_CYAN)▶ Launching search...$(COLOR_RESET)\n"
+	@$(MAKE) search
+
+	@printf "\n$(COLOR_CYAN)▶ Launching answer generation...$(COLOR_RESET)\n"
+	@$(MAKE) answer
+
+	@printf "\n$(COLOR_CYAN)▶ Launching evaluation...$(COLOR_RESET)\n"
+	@$(MAKE) evaluate
+
+	@printf "\n$(COLOR_GREEN)✓ Complete pipeline finished successfully.$(COLOR_RESET)\n"
+
 index:
 	@printf "$(COLOR_CYAN)Starting indexing $(COLOR_RESET)\n"
-	@uv run python -m src index --repo_path=./vllm --max_chunk_size=2000
+	@uv run python -m src index --repo_path=./data/row/vllm-0.10.1/vllm --max_chunk_size=2000
 
 search:
 	@printf "$(COLOR_CYAN)Starting searching $(COLOR_RESET)\n"
-	@uv run python -m src search_dataset
-	--dataset_path data/datasets/UnansweredQuestions/dataset_docs_public.json
-	--k 10
-	--save_directory data/output/search_results
+	@uv run python -m src search_datasets \
+		--k 10 \
+		--index_dir data/processed \
+		--output_dir data/output/search_results \
+		--docs_dataset_path datasets_public/public/UnansweredQuestions/dataset_docs_public.json \
+		--code_dataset_path datasets_public/public/UnansweredQuestions/dataset_code_public.json
 
 answer:
 	@printf "$(COLOR_CYAN)Starting answering $(COLOR_RESET)\n"
-	@uv run python -m src answer_dataset
-	--student_search_results_path data/output/search_results/dataset_docs_public.json
-	--save_directory data/output/search_results_and_answer
+	@uv run python -m src answer_dataset \
+		--student_search_results_path data/output/search_results/dataset_docs_public.json \
+		--save_directory data/output/search_results_and_answer
 
 evaluate:
 	@printf "$(COLOR_CYAN)Starting evaluating $(COLOR_RESET)\n"
-	@uv run python -m src evaluate_dataset
-	--student_answer_path data/output/search_results/dataset_docs_public.json
-	--dataset_path data/datasets/AnsweredQuestions/dataset_docs_public.json
-	--k 10
-	--max_context_length 2000
+	@uv run python -m src.evaluation evaluate_dataset \
+		--student_search_results_path data/output/search_results/dataset_docs_public.json \
+		--ground_truth_path datasets_public/public/AnsweredQuestions/dataset_docs_public.json \
+		--dataset_type docs \
+		--repo_path ./data/row/vllm-0.10.1/vllm \
+		--output_path data/eval_results_docs.json
 
 debug:
 	@printf "$(COLOR_YELLOW)========================================================$(COLOR_RESET)\n"

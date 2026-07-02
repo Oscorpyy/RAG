@@ -1,32 +1,41 @@
 """
 retrieval.py — RAG against the machine
-Semantic search over the BM25 index produced by the ingestion phase.
+Recherche BM25 sur l'index produit par la phase d'ingestion.
 
-Usage (CLI via Fire):
-    python retrieval.py search  --query="how does vllm schedule requests" --top_k=5
-    python retrieval.py search_dataset \\
-        --dataset_path=data/questions.json \\
-        --output_path=data/results.json \\
-        --top_k=5
+L'index est chargé via l'API native de bm25s (BM25.load) depuis le
+dossier `data/processed` — aucun pickle, aucun fichier fait main.
+
+Usage CLI (via Fire) :
+    python -m student search_dataset \\
+        --dataset_path=datasets_public/public/UnansweredQuestions/\
+        dataset_docs_public.json \
+        --output_path=data/results_docs.json \\
+        --k=5
+
+    python -m student search_dataset \\
+        --dataset_path=datasets_public/public/UnansweredQuestions/\
+        dataset_code_public.json \
+        --output_path=data/results_code.json \\
+        --k=10
+
+    python -m student search \\
+        --query="how does vllm schedule requests" \\
+        --k=5
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import pickle
-import re
 import time
 from pathlib import Path
-from typing import Optional
 
-import fire
-from rank_bm25 import BM25Okapi
+import bm25s
 from tqdm import tqdm
 
 from .models import (
+    MinimalSearchResults,
     MinimalSource,
-    SearchResult,
     StudentSearchResults,
     UnansweredQuestion,
 )
@@ -42,235 +51,191 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constantes
 # ---------------------------------------------------------------------------
 
-DEFAULT_INDEX_DIR: str = "data/processed"
-DEFAULT_INDEX_FILE: str = "index.pkl"
-DEFAULT_TOP_K: int = 5
-
-
-# ---------------------------------------------------------------------------
-# Tokeniser (must match the one used during ingestion)
-# ---------------------------------------------------------------------------
-
-_TOKEN_RE = re.compile(r"[a-zA-Z0-9_]+")
-
-
-def _tokenize(text: str) -> list[str]:
-    """
-    Tokenise text into lowercase alphanumeric+underscore tokens.
-
-    Must be identical to the tokeniser used in ingestion.py so that
-    query tokens are in the same vocabulary as the index.
-    """
-    return _TOKEN_RE.findall(text.lower())
+DEFAULT_INDEX_DIR: str = str(
+    Path(__file__).resolve().parents[1] / "data" / "processed"
+)
+DEFAULT_K: int = 5
+DEFAULT_SEARCH_OUTPUT_DIR: str = str(
+    Path(__file__).resolve().parents[1] / "data" / "output" / "search_results"
+)
+DEFAULT_DOCS_DATASET_PATH: str = (
+    "datasets_public/public/UnansweredQuestions/dataset_docs_public.json"
+)
+DEFAULT_CODE_DATASET_PATH: str = (
+    "datasets_public/public/UnansweredQuestions/dataset_code_public.json"
+)
 
 
 # ---------------------------------------------------------------------------
-# Index loader  (cold-start ≤ 60 s on vLLM corpus)
+# Chargement de l'index (API native bm25s — zéro code de désérialisation)
 # ---------------------------------------------------------------------------
 
 
 def load_index(
-    index_path: Optional[str] = None,
     index_dir: str = DEFAULT_INDEX_DIR,
-    index_file: str = DEFAULT_INDEX_FILE,
-) -> tuple[BM25Okapi, list[MinimalSource]]:
+) -> tuple[bm25s.BM25, list[MinimalSource]]:
     """
-    Load a BM25 index and its associated sources from disk.
+    Charge l'index BM25 et les chunks depuis le dossier produit par
+    bm25s.save().
 
-    Resolution order for the index path:
-      1. Explicit ``index_path`` argument.
-      2. ``<index_dir>/<index_file>`` (default: data/processed/index.pkl).
+    Les fichiers lus sont ceux créés nativement par bm25s lors de l'ingestion :
+      - params.index.json  (hyperparamètres)
+      - vocab.index.json   (vocabulaire)
+      - data/indices/indptr.csc.index.npy  (matrice creuse)
+      - corpus.jsonl       (nos MinimalSource, une par ligne)
+
+    Aucun pickle, aucun json.dump écrit par nos soins — c'est bm25s qui gère.
 
     Args:
-        index_path:  Absolute or relative path to the .pkl file. Overrides
-                     ``index_dir`` / ``index_file`` when provided.
-        index_dir:   Directory that contains the index file.
-        index_file:  Filename of the pickled index (default: index.pkl).
+        index_dir: Dossier contenant les fichiers d'index.
 
     Returns:
-        (bm25_index, list_of_MinimalSource)
+        (retriever_bm25s, liste_de_MinimalSource)
 
     Raises:
-        FileNotFoundError: If the resolved path does not exist.
-        KeyError:          If the pickle payload is missing expected keys.
+        FileNotFoundError: si le dossier ou les fichiers d'index sont absents.
     """
-    resolved = Path(index_path) if index_path else Path(index_dir) / index_file
-
-    if not resolved.exists():
+    idx_path = Path(index_dir)
+    if not idx_path.exists():
         raise FileNotFoundError(
-            f"Index not found at '{resolved.resolve()}'. "
-            "Run the ingestion phase first: "
-            "python -m student index --repo_path=./vllm"
+            f"Dossier d'index introuvable : '{idx_path.resolve()}'\n"
+            "Lance d'abord : python -m student index --repo_path=./vllm"
         )
 
-    logger.info("Loading index from %s …", resolved)
+    required = ["params.index.json", "vocab.index.json", "corpus.jsonl"]
+    missing = [f for f in required if not (idx_path / f).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Fichiers d'index manquants dans '{idx_path}' : {missing}\n"
+            "Lance d'abord : python -m student index --repo_path=./vllm"
+        )
+
+    logger.info("Chargement de l'index depuis %s …", idx_path)
     t0 = time.perf_counter()
 
-    with open(resolved, "rb") as fh:
-        payload = pickle.load(fh)
-
-    if "index" not in payload or "sources" not in payload:
-        raise KeyError(
-            f"Unexpected pickle format in '{resolved}'. "
-            "Expected keys: 'index', 'sources'."
-        )
-
-    bm25: BM25Okapi = payload["index"]
+    # bm25s.BM25.load() recharge l'index ET le corpus en un seul appel
+    retriever = bm25s.BM25.load(str(idx_path), load_corpus=True)
     sources: list[MinimalSource] = [
-        MinimalSource(**s) if isinstance(s, dict) else s
-        for s in payload["sources"]
+        MinimalSource(**doc) for doc in retriever.corpus
     ]
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "Index loaded in %.2fs — %d chunks, vocab: %d terms",
+        "Index chargé en %.2fs — %d chunks, %d termes dans le vocab",
         elapsed,
         len(sources),
-        len(bm25.idf),
+        len(retriever.vocab_dict),
     )
-    return bm25, sources
+    return retriever, sources
 
 
 # ---------------------------------------------------------------------------
-# Core search
+# Recherche unitaire
 # ---------------------------------------------------------------------------
 
 
 def search(
     query: str,
-    bm25: BM25Okapi,
+    retriever: bm25s.BM25,
     sources: list[MinimalSource],
-    top_k: int = DEFAULT_TOP_K,
+    k: int = DEFAULT_K,
 ) -> list[MinimalSource]:
     """
-    Retrieve the top-k most relevant chunks for a single query.
+    Retourne les k meilleures sources pour une requête.
 
-    The function tokenises the query with the same tokeniser used at
-    index time, calls ``BM25Okapi.get_scores``, and returns the
-    ``top_k`` sources ordered by descending BM25 score.
-
-    Args:
-        query:   Natural-language or code search query.
-        bm25:    Pre-loaded BM25Okapi index.
-        sources: List of MinimalSource objects aligned with the index.
-        top_k:   Number of results to return (default: 5).
-
-    Returns:
-        Ordered list of up to ``top_k`` MinimalSource objects.
-        Every item is guaranteed to contain file_path,
-        first_character_index, and last_character_index.
-    """
-    if not query.strip():
-        logger.warning("Empty query received — returning no results.")
-        return []
-
-    tokens = _tokenize(query)
-    if not tokens:
-        logger.warning("Query '%s' produced no tokens — returning no results.", query)
-        return []
-
-    scores = bm25.get_scores(tokens)
-
-    # argsort descending; limit to min(top_k, len(sources))
-    k = min(top_k, len(sources))
-    # numpy is a transitive dep of rank-bm25, so scores is an ndarray
-    top_indices = scores.argsort()[::-1][:k]
-
-    results: list[MinimalSource] = [sources[i] for i in top_indices]
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Batch search
-# ---------------------------------------------------------------------------
-
-
-def search_dataset(
-    questions: list[UnansweredQuestion],
-    bm25: BM25Okapi,
-    sources: list[MinimalSource],
-    top_k: int = DEFAULT_TOP_K,
-) -> StudentSearchResults:
-    """
-    Run search for every question in a dataset and aggregate results.
+    La requête est tokenisée avec bm25s.tokenize (return_ids=False) pour
+    être compatible avec le vocabulaire de l'index chargé.
 
     Args:
-        questions: List of UnansweredQuestion models to process.
-        bm25:      Pre-loaded BM25Okapi index.
-        sources:   List of MinimalSource objects aligned with the index.
-        top_k:     Number of results per question (default: 5).
+        query:     Requête en langage naturel ou extrait de code.
+        retriever: Index BM25 chargé via load_index().
+        sources:   Liste de MinimalSource alignée avec l'index.
+        k:         Nombre de résultats à retourner.
 
     Returns:
-        StudentSearchResults containing one SearchResult per question.
+        Liste ordonnée de MinimalSource (meilleur score en premier).
+        Liste vide si la requête est vide ou hors-vocabulaire.
     """
-    results: list[SearchResult] = []
+    query = query.strip()
+    if not query:
+        logger.warning("Requête vide — aucun résultat.")
+        return []
 
-    for question in tqdm(questions, desc="Searching", unit="q"):
-        try:
-            top_sources = search(question.question, bm25, sources, top_k)
-            results.append(
-                SearchResult(
-                    question_id=question.id,
-                    sources=top_sources,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Search failed for question id=%s: %s", question.id, exc
-            )
-            results.append(
-                SearchResult(question_id=question.id, sources=[])
-            )
+    # return_ids=False : tokens texte bruts, compatibles avec l'index
+    query_tokens = bm25s.tokenize(
+        query, stopwords=None, return_ids=False, show_progress=False
+    )
 
-    return StudentSearchResults(results=results)
+    k_eff = min(k, len(sources))
+    if k_eff == 0:
+        return []
+
+    results, _scores = retriever.retrieve(
+        query_tokens,
+        corpus=[s.model_dump() for s in sources],
+        k=k_eff,
+    )
+
+    # results a la forme [[doc_0, doc_1, ...]] (1 ligne = 1 requête)
+    top_docs: list[dict] = results[0].tolist()
+    return [MinimalSource(**doc) for doc in top_docs]
 
 
 # ---------------------------------------------------------------------------
-# I/O helpers
+# Chargement des questions
 # ---------------------------------------------------------------------------
 
 
 def load_questions(dataset_path: str) -> list[UnansweredQuestion]:
     """
-    Load a JSON dataset of questions into UnansweredQuestion models.
+    Charge un fichier JSON de questions vers une liste de UnansweredQuestion.
 
-    The JSON file must be either:
-      - A JSON array of question objects, or
-      - A JSON object with a ``"questions"`` key containing such an array.
+    Formats acceptés :
+      - Liste bare :  [{question_id, question}, ...]
+      - Objet wrappé : {\"questions\": [{question_id, question}, ...]}
+      - Objet wrappé : {\"rag_questions\": [{question_id, question}, ...]}
 
     Args:
-        dataset_path: Path to the JSON question file.
+        dataset_path: Chemin vers le fichier JSON.
 
     Returns:
-        List of UnansweredQuestion models.
+        Liste de UnansweredQuestion validés par Pydantic.
 
     Raises:
-        FileNotFoundError: If the file does not exist.
-        ValueError:        If the JSON structure is unrecognised.
+        FileNotFoundError: si le fichier est absent.
+        ValueError:        si le format JSON est inconnu.
     """
     path = Path(dataset_path)
     if not path.exists():
-        raise FileNotFoundError(f"Dataset not found: '{path.resolve()}'")
+        raise FileNotFoundError(
+            f"Dataset introuvable : '{path.resolve()}'\n"
+            "Chemin attendu : "
+            "datasets_public/public/"
+            "UnansweredQuestions/dataset_docs_public.json"
+        )
 
     with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
 
-    # Accept both {"questions": [...]} and bare [...]
+    # Normalise vers une liste brute
     if isinstance(raw, dict):
-        if "questions" in raw:
-            raw = raw["questions"]
+        for key in ("rag_questions", "questions"):
+            if key in raw:
+                raw = raw[key]
+                break
         else:
             raise ValueError(
-                f"Unrecognised JSON structure in '{path}'. "
-                "Expected a list or a dict with key 'questions'."
+                f"Structure JSON non reconnue dans '{path}'. "
+                "Clés trouvées : " + str(list(raw.keys()))
             )
 
     if not isinstance(raw, list):
         raise ValueError(
-            f"Expected a JSON array in '{path}', got {type(raw).__name__}."
+            f"Attendu une liste JSON dans '{path}', "
+            f"obtenu : {type(raw).__name__}"
         )
 
     questions: list[UnansweredQuestion] = []
@@ -278,20 +243,45 @@ def load_questions(dataset_path: str) -> list[UnansweredQuestion]:
         try:
             questions.append(UnansweredQuestion(**item))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Skipping malformed question at index %d: %s", i, exc)
+            logger.warning("Question ignorée à l'index %d : %s", i, exc)
 
-    logger.info("Loaded %d question(s) from %s", len(questions), path)
+    logger.info("%d question(s) chargée(s) depuis %s", len(questions), path)
     return questions
+
+
+# ---------------------------------------------------------------------------
+# Sauvegarde des résultats
+# ---------------------------------------------------------------------------
 
 
 def save_results(results: StudentSearchResults, output_path: str) -> None:
     """
-    Serialise a StudentSearchResults object to a JSON file.
+    Sérialise un StudentSearchResults en JSON.
+
+    Format produit (conforme au modèle Pydantic) ::
+
+        {
+          "search_results": [
+            {
+              "question_id": "...",
+              "question": "...",
+              "retrieved_sources": [
+                {
+                  "file_path": "vllm/engine/...",
+                  "first_character_index": 0,
+                  "last_character_index": 1842
+                },
+                ...
+              ]
+            },
+            ...
+          ],
+          "k": 5
+        }
 
     Args:
-        results:     The aggregated search results to save.
-        output_path: Destination path for the JSON file.
-                     Parent directories are created if they do not exist.
+        results:     Résultats agrégés à sauvegarder.
+        output_path: Chemin de sortie (répertoires créés si nécessaire).
     """
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -299,150 +289,208 @@ def save_results(results: StudentSearchResults, output_path: str) -> None:
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(results.model_dump(), fh, indent=2, ensure_ascii=False)
 
-    logger.info("Results saved → %s", out)
+    logger.info("Résultats sauvegardés → %s", out)
+
+
+def _search_dataset_to_path(
+    dataset_path: str,
+    output_path: str,
+    retriever: bm25s.BM25,
+    sources: list[MinimalSource],
+    k: int,
+) -> None:
+    questions = load_questions(dataset_path)
+    if not questions:
+        logger.error("Aucune question chargée depuis %s", dataset_path)
+        return
+
+    results = run_search_dataset(questions, retriever, sources, k)
+    save_results(results, output_path)
 
 
 # ---------------------------------------------------------------------------
-# Retriever class  (stateful wrapper for reuse across CLI calls)
+# Recherche batch
+# ---------------------------------------------------------------------------
+
+
+def run_search_dataset(
+    questions: list[UnansweredQuestion],
+    retriever: bm25s.BM25,
+    sources: list[MinimalSource],
+    k: int = DEFAULT_K,
+) -> StudentSearchResults:
+    """
+    Lance la recherche pour toutes les questions et agrège les résultats.
+
+    Args:
+        questions: Questions à traiter.
+        retriever: Index BM25 chargé.
+        sources:   Sources alignées avec l'index.
+        k:         Nombre de résultats par question.
+
+    Returns:
+        StudentSearchResults avec un MinimalSearchResults par question.
+    """
+    search_results: list[MinimalSearchResults] = []
+
+    for question in tqdm(questions, desc="Recherche", unit="q"):
+        try:
+            top_sources = search(question.question, retriever, sources, k)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Échec pour question_id=%s : %s", question.question_id, exc
+            )
+            top_sources = []
+
+        search_results.append(
+            MinimalSearchResults(
+                question_id=question.question_id,
+                question=question.question,
+                retrieved_sources=top_sources,
+            )
+        )
+
+    return StudentSearchResults(search_results=search_results, k=k)
+
+
+# ---------------------------------------------------------------------------
+# Classe Retriever (wrapper stateful)
 # ---------------------------------------------------------------------------
 
 
 class Retriever:
     """
-    Stateful wrapper that owns a loaded BM25 index.
+    Wrapper stateful qui détient l'index BM25 en mémoire.
 
-    Preferred for repeated searches (avoids reloading the index on every
-    call) and for testing (the index can be injected directly).
+    Préférable pour les appels répétés : l'index n'est chargé qu'une seule
+    fois, ce qui amortit le temps de cold-start sur les gros corpus.
 
-    Example::
+    Exemple ::
 
-        retriever = Retriever.from_disk("data/processed/index.pkl")
-        sources   = retriever.search("PagedAttention memory layout", top_k=5)
+        r = Retriever.from_disk("data/processed")
+        sources = r.search("PagedAttention KV cache", k=5)
     """
 
     def __init__(
         self,
-        bm25: BM25Okapi,
+        retriever: bm25s.BM25,
         sources: list[MinimalSource],
     ) -> None:
-        self._bm25 = bm25
+        self._retriever = retriever
         self._sources = sources
 
-    # ------------------------------------------------------------------
-    # Constructors
-    # ------------------------------------------------------------------
-
     @classmethod
-    def from_disk(
-        cls,
-        index_path: Optional[str] = None,
-        index_dir: str = DEFAULT_INDEX_DIR,
-        index_file: str = DEFAULT_INDEX_FILE,
-    ) -> "Retriever":
-        """Load index from disk and return a ready Retriever."""
-        bm25, sources = load_index(index_path, index_dir, index_file)
-        return cls(bm25, sources)
+    def from_disk(cls, index_dir: str = DEFAULT_INDEX_DIR) -> "Retriever":
+        """Charge l'index depuis le disque et retourne un Retriever prêt."""
+        retriever, sources = load_index(index_dir)
+        return cls(retriever, sources)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def search(
-        self,
-        query: str,
-        top_k: int = DEFAULT_TOP_K,
-    ) -> list[MinimalSource]:
-        """Single-query search. See module-level ``search()`` for details."""
-        return search(query, self._bm25, self._sources, top_k)
+    def search(self, query: str, k: int = DEFAULT_K) -> list[MinimalSource]:
+        """Recherche unitaire."""
+        return search(query, self._retriever, self._sources, k)
 
     def search_dataset(
         self,
         questions: list[UnansweredQuestion],
-        top_k: int = DEFAULT_TOP_K,
+        k: int = DEFAULT_K,
     ) -> StudentSearchResults:
-        """Batch search. See module-level ``search_dataset()`` for details."""
-        return search_dataset(questions, self._bm25, self._sources, top_k)
-
-    # ------------------------------------------------------------------
-    # Introspection
-    # ------------------------------------------------------------------
+        """Recherche batch."""
+        return run_search_dataset(questions, self._retriever, self._sources, k)
 
     @property
     def corpus_size(self) -> int:
-        """Number of indexed chunks."""
+        """Nombre de chunks indexés."""
         return len(self._sources)
 
     @property
     def vocab_size(self) -> int:
-        """Number of distinct tokens in the BM25 vocabulary."""
-        return len(self._bm25.idf)
+        """Taille du vocabulaire BM25."""
+        return len(self._retriever.vocab_dict)
 
 
 # ---------------------------------------------------------------------------
-# CLI  (Fire)
+# CLI (Fire)
 # ---------------------------------------------------------------------------
 
 
 class RetrievalCLI:
     """
-    CLI for the retrieval phase of RAG against the machine.
+    CLI pour la phase de retrieval de RAG against the machine.
 
-    Commands
-    --------
-    search          Run a single query and print results.
-    search_dataset  Batch-process a JSON question file and write results.
+    Commandes
+    ---------
+    search          Recherche unitaire, affiche les résultats dans le
+                    terminal.
+    search_dataset  Batch : lit un fichier JSON de questions, écrit les
+                    résultats.
 
-    Examples
+    Exemples
     --------
     ::
 
-        python retrieval.py search --query="vllm continuous batching" --top_k=5
-        python retrieval.py search_dataset \\
-            --dataset_path=data/questions.json \\
-            --output_path=data/results.json   \\
-            --top_k=5
+        # Recherche unitaire
+        python -m student search \
+            --query="how does vllm schedule requests" \
+            --k=5
+
+        # Dataset docs
+        python -m student search_dataset \
+            --dataset_path=datasets_public/public/UnansweredQuestions/\
+            dataset_docs_public.json \
+            --output_path=data/results_docs.json \
+            --k=5
+
+        # Dataset code
+        python -m student search_dataset \
+            --dataset_path=datasets_public/public/UnansweredQuestions/\
+            dataset_code_public.json \
+            --output_path=data/results_code.json \
+            --k=10
+
+        # Index dans un autre dossier
+        python -m student search_dataset \
+            --dataset_path=... \
+            --output_path=... \
+            --k=5 \
+            --index_dir=mon/autre/dossier
     """
 
     def search(
         self,
         query: str,
-        top_k: int = DEFAULT_TOP_K,
-        index_path: Optional[str] = None,
+        k: int = DEFAULT_K,
         index_dir: str = DEFAULT_INDEX_DIR,
-        index_file: str = DEFAULT_INDEX_FILE,
     ) -> None:
         """
-        Retrieve and print the top-k sources for a single query.
+        Recherche unitaire : affiche les k meilleures sources dans le terminal.
 
         Args:
-            query:       The search query string.
-            top_k:       Number of results to display (default: 5).
-            index_path:  Optional direct path to the .pkl index file.
-            index_dir:   Directory containing the index (default: data/processed).
-            index_file:  Filename of the index (default: index.pkl).
+            query:     La requête de recherche.
+            k:         Nombre de résultats (défaut : 5).
+            index_dir: Dossier de l'index BM25 (défaut : data/processed,
+                       relatif à la racine du paquet).
         """
-        retriever = Retriever.from_disk(index_path, index_dir, index_file)
-
+        retriever = Retriever.from_disk(index_dir)
         logger.info(
-            "Index ready — %d chunks, %d vocab terms",
+            "Index prêt — %d chunks, %d termes",
             retriever.corpus_size,
             retriever.vocab_size,
         )
 
         t0 = time.perf_counter()
-        results = retriever.search(query, top_k)
-        elapsed = time.perf_counter() - t0
+        results = retriever.search(query, k)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
 
-        print(f"\n🔍 Query : {query!r}")
-        print(f"   Top-{top_k} results  ({elapsed * 1000:.1f} ms)\n")
+        print(f"\n🔍 Requête : {query!r}")
+        print(f"   Top-{k} résultats  ({elapsed_ms:.1f} ms)\n")
 
         if not results:
-            print("   (no results)")
+            print("   (aucun résultat)")
             return
 
         for rank, src in enumerate(results, start=1):
             print(
-                f"   [{rank}] {src.file_path}"
+                f"   [{rank:>2}] {src.file_path}"
                 f"  [{src.first_character_index}:{src.last_character_index}]"
             )
 
@@ -450,44 +498,98 @@ class RetrievalCLI:
         self,
         dataset_path: str,
         output_path: str,
-        top_k: int = DEFAULT_TOP_K,
-        index_path: Optional[str] = None,
+        k: int = DEFAULT_K,
         index_dir: str = DEFAULT_INDEX_DIR,
-        index_file: str = DEFAULT_INDEX_FILE,
     ) -> None:
         """
-        Batch-process a JSON question file and write a StudentSearchResults JSON.
+        Batch : traite toutes les questions d'un fichier JSON et écrit les
+        résultats.
+
+        Le fichier de sortie contient un StudentSearchResults complet :
+        k meilleures sources (retrieved_sources) pour chaque question.
 
         Args:
-            dataset_path: Path to the JSON file containing UnansweredQuestion objects.
-            output_path:  Destination path for the StudentSearchResults JSON.
-            top_k:        Number of results per question (default: 5).
-            index_path:   Optional direct path to the .pkl index file.
-            index_dir:    Directory containing the index (default: data/processed).
-            index_file:   Filename of the index (default: index.pkl).
+            dataset_path: Chemin vers le JSON de questions
+                          (UnansweredQuestion).
+                          Ex:
+                          datasets_public/public/UnansweredQuestions/
+                          dataset_docs_public.json
+            output_path:  Chemin du JSON de sortie (StudentSearchResults).
+                          Ex: data/results_docs.json
+            k:            Nombre de résultats par question (défaut : 5).
+            index_dir:    Dossier de l'index BM25 (défaut :
+                          data/processed, relatif à la racine du paquet).
         """
         t_start = time.perf_counter()
 
-        retriever = Retriever.from_disk(index_path, index_dir, index_file)
+        retriever = Retriever.from_disk(index_dir)
         questions = load_questions(dataset_path)
 
         if not questions:
-            logger.error("No questions loaded — aborting.")
+            logger.error("Aucune question chargée — abandon.")
             return
 
-        results = retriever.search_dataset(questions, top_k)
+        results = retriever.search_dataset(questions, k)
         save_results(results, output_path)
 
         total = time.perf_counter() - t_start
-        per_q = (total / len(questions)) * 1000 if questions else 0
+        per_q_ms = (total / len(questions)) * 1000
 
-        print("\n✅ Batch search complete")
-        print(f"   Questions processed : {len(questions)}")
-        print(f"   Output              : {output_path}")
-        print(f"   Total time          : {total:.2f}s")
-        print(f"   Average / question  : {per_q:.1f} ms")
+        print("\n✅ Recherche batch terminée")
+        print(f"   Questions traitées   : {len(questions)}")
+        print(f"   k (résultats/question): {k}")
+        print(f"   Fichier de sortie    : {output_path}")
+        print(f"   Durée totale         : {total:.2f}s")
+        print(f"   Moyenne / question   : {per_q_ms:.1f} ms")
 
         if len(questions) > 0:
-            projected = (total / len(questions)) * 1000
-            status = "✅" if projected < 90 else "⚠️ "
-            print(f"   Projected (1 000 q) : {projected:.1f}s  {status}")
+            projected_1000 = per_q_ms * 1000 / 1000  # en secondes
+            status = "✅" if projected_1000 < 90 else "⚠️ "
+            print(f"   Projeté (1 000 q)    : {projected_1000:.1f}s  {status}")
+
+    def search_datasets(
+        self,
+        k: int = DEFAULT_K,
+        index_dir: str = DEFAULT_INDEX_DIR,
+        output_dir: str = DEFAULT_SEARCH_OUTPUT_DIR,
+        docs_dataset_path: str = DEFAULT_DOCS_DATASET_PATH,
+        code_dataset_path: str = DEFAULT_CODE_DATASET_PATH,
+    ) -> None:
+        """
+        Génère les résultats de recherche pour les jeux de questions docs
+        et code.
+
+        Les sorties sont écrites dans :
+          - data/output/search_results/dataset_docs_public.json
+          - data/output/search_results/dataset_code_public.json
+        """
+        t_start = time.perf_counter()
+        retriever = Retriever.from_disk(index_dir)
+
+        output_root = Path(output_dir)
+        output_root.mkdir(parents=True, exist_ok=True)
+
+        docs_output_path = output_root / "dataset_docs_public.json"
+        code_output_path = output_root / "dataset_code_public.json"
+
+        print("\n🔎 Génération des résultats docs et code…")
+        _search_dataset_to_path(
+            docs_dataset_path,
+            str(docs_output_path),
+            retriever._retriever,
+            retriever._sources,
+            k,
+        )
+        _search_dataset_to_path(
+            code_dataset_path,
+            str(code_output_path),
+            retriever._retriever,
+            retriever._sources,
+            k,
+        )
+
+        elapsed = time.perf_counter() - t_start
+        print("\n✅ Résultats générés")
+        print(f"   Docs : {docs_output_path}")
+        print(f"   Code : {code_output_path}")
+        print(f"   Durée totale : {elapsed:.2f}s")

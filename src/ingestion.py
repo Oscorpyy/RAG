@@ -78,7 +78,7 @@ def _iter_markdown_chunks(
         yield MinimalSource(
             file_path=file_path,
             first_character_index=0,
-            last_character_index=len(content),
+            last_character_index=max(0, len(content) - 1),
         ), content
         return
 
@@ -211,7 +211,7 @@ def _split_if_oversized(
         yield MinimalSource(
             file_path=file_path,
             first_character_index=start + pos,
-            last_character_index=start + slice_end,
+            last_character_index=start + slice_end - 1,
         ), slice_text
         if slice_end >= text_len:
             break
@@ -248,7 +248,7 @@ def _iter_python_chunks(
         yield MinimalSource(
             file_path=file_path,
             first_character_index=0,
-            last_character_index=len(content),
+            last_character_index=max(0, len(content) - 1),
         ), content
         return
 
@@ -511,7 +511,7 @@ class IngestionCLI:
         self,
         repo_path: str,
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
-        overlap: int = DEFAULT_OVERLAP,
+        overlap: int | None = None,
         index_dir: str = DEFAULT_INDEX_DIR,
     ) -> None:
         """
@@ -527,6 +527,9 @@ class IngestionCLI:
             index_dir:      Répertoire de sortie de l'index bm25s
                             (défaut: data/processed).
         """
+        if overlap is None:
+            overlap = max_chunk_size // 10
+
         if max_chunk_size < 10:
             raise ValueError(
                 f"max_chunk_size ne peut pas être inférieur à 10 "
