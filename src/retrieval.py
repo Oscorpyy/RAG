@@ -54,20 +54,14 @@ logger = logging.getLogger(__name__)
 # Constantes
 # ---------------------------------------------------------------------------
 
-DEFAULT_INDEX_DIR: str = str(
-    Path(__file__).resolve().parents[1] / "data" / "processed"
-)
-DEFAULT_K: int = 5
-DEFAULT_SEARCH_OUTPUT_DIR: str = str(
-    Path(__file__).resolve().parents[1] / "data" / "output" / "search_results"
-)
-DEFAULT_DOCS_DATASET_PATH: str = (
-    "datasets_public/public/UnansweredQuestions/dataset_docs_public.json"
-)
-DEFAULT_CODE_DATASET_PATH: str = (
-    "datasets_public/public/UnansweredQuestions/dataset_code_public.json"
-)
+# Chemin absolu du dossier racine du projet (rag/)
+PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
+DEFAULT_INDEX_DIR: str = str(PROJECT_ROOT / "data" / "processed")
+DEFAULT_K: int = 5
+DEFAULT_SEARCH_OUTPUT_DIR: str = str(PROJECT_ROOT / "data" / "output" / "search_results")
+DEFAULT_DOCS_DATASET_PATH: str = "datasets_public/public/UnansweredQuestions/dataset_docs_public.json"
+DEFAULT_CODE_DATASET_PATH: str = "datasets_public/public/UnansweredQuestions/dataset_code_public.json"
 
 # ---------------------------------------------------------------------------
 # Chargement de l'index (API native bm25s — zéro code de désérialisation)
@@ -80,48 +74,37 @@ def load_index(
     """
     Charge l'index BM25 et les chunks depuis le dossier produit par
     bm25s.save().
-
-    Les fichiers lus sont ceux créés nativement par bm25s lors de l'ingestion :
-      - params.index.json  (hyperparamètres)
-      - vocab.index.json   (vocabulaire)
-      - data/indices/indptr.csc.index.npy  (matrice creuse)
-      - corpus.jsonl       (nos MinimalSource, une par ligne)
-
-    Aucun pickle, aucun json.dump écrit par nos soins — c'est bm25s qui gère.
-
-    Args:
-        index_dir: Dossier contenant les fichiers d'index.
-
-    Returns:
-        (retriever_bm25s, liste_de_MinimalSource)
-
-    Raises:
-        FileNotFoundError: si le dossier ou les fichiers d'index sont absents.
     """
-    idx_path = Path(index_dir)
-    if not idx_path.exists():
-        raise FileNotFoundError(
-            f"Dossier d'index introuvable : '{idx_path.resolve()}'\n"
-            "Lance d'abord : python -m student index --repo_path=./vllm"
-        )
-
-    required = ["params.index.json", "vocab.index.json", "corpus.jsonl"]
-    missing = [f for f in required if not (idx_path / f).exists()]
-    if missing:
-        raise FileNotFoundError(
-            f"Fichiers d'index manquants dans '{idx_path}' : {missing}\n"
-            "Lance d'abord : python -m student index --repo_path=./vllm"
-        )
-
-    logger.info("Chargement de l'index depuis %s …", idx_path)
+    # 1. On initialise le chrono et le chemin d'accès
     t0 = time.perf_counter()
+    idx_path = Path(index_dir)
 
-    # bm25s.BM25.load() recharge l'index ET le corpus en un seul appel
+    # 2. bm25s.BM25.load() recharge l'index ET le corpus en un seul appel
     retriever = bm25s.BM25.load(str(idx_path), load_corpus=True)
-    sources: list[MinimalSource] = [
-        MinimalSource(**doc) for doc in retriever.corpus
-    ]
 
+    sources: list[MinimalSource] = []
+    
+    # --- DÉBUT DE LA NOUVELLE LOGIQUE ---
+    for doc in retriever.corpus:
+        doc_dict = dict(doc)
+        raw_path = str(doc_dict["file_path"])
+
+        # 1. Si le chemin absolu contient "data", on coupe tout ce qu'il y a avant
+        if "data" in Path(raw_path).parts:
+            parts = Path(raw_path).parts
+            data_index = parts.index("data")
+            final_path = Path(*parts[data_index:]).as_posix()
+            
+        # 2. Si le chemin commence directement par "vllm", on préfixe le bon dossier
+        else:
+            final_path = f"data/raw/vllm-0.10.1/{raw_path}"
+
+        # On écrase avec le format propre en string
+        doc_dict["file_path"] = final_path
+        sources.append(MinimalSource(**doc_dict))
+    # --- FIN DE LA NOUVELLE LOGIQUE ---
+
+    # 3. Calcul du temps écoulé
     elapsed = time.perf_counter() - t0
     logger.info(
         "Index chargé en %.2fs — %d chunks, %d termes dans le vocab",
@@ -287,7 +270,7 @@ def save_results(results: StudentSearchResults, output_path: str) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     with open(out, "w", encoding="utf-8") as fh:
-        json.dump(results.model_dump(), fh, indent=2, ensure_ascii=False)
+        json.dump(results.model_dump(by_alias=True), fh, indent=2, ensure_ascii=False)
 
     logger.info("Résultats sauvegardés → %s", out)
 

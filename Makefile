@@ -33,7 +33,7 @@ run:
 
 index:
 	@printf "$(COLOR_CYAN)Starting indexing $(COLOR_RESET)\n"
-	@uv run python -m src index --repo_path=./data/row/vllm-0.10.1/vllm --max_chunk_size=2000
+	@uv run python -m src index --repo_path=./data/raw/vllm-0.10.1/vllm --max_chunk_size=2000
 
 search:
 	@printf "$(COLOR_CYAN)Starting searching $(COLOR_RESET)\n"
@@ -56,9 +56,14 @@ evaluate:
 		--student_search_results_path data/output/search_results/dataset_docs_public.json \
 		--ground_truth_path datasets_public/public/AnsweredQuestions/dataset_docs_public.json \
 		--dataset_type docs \
-		--repo_path ./data/row/vllm-0.10.1/vllm \
+		--repo_path . \
 		--output_path data/eval_results_docs.json
-
+	@uv run python -m src.evaluation evaluate_dataset \
+		--student_search_results_path data/output/search_results/dataset_code_public.json \
+		--ground_truth_path datasets_public/public/AnsweredQuestions/dataset_code_public.json \
+		--dataset_type code \
+		--repo_path . \
+		--output_path data/eval_results_code.json
 debug:
 	@printf "$(COLOR_YELLOW)========================================================$(COLOR_RESET)\n"
 	@printf "$(COLOR_YELLOW)Debug mode enabled (pdb)$(COLOR_RESET)\n"
@@ -110,7 +115,7 @@ lint-strict:
 
 test:
 	@printf "$(COLOR_CYAN)Running tests...$(COLOR_RESET)\n"
-
+	@./moulinette/moulinette-ubuntu evaluate_student_search_results data/output/search_results/dataset_docs_public.json datasets_public/public/AnsweredQuestions/dataset_docs_public.json --k 5 --max_context_length 1000 --threshold 0.80 
 
 .PHONY: all install run debug clean re lint lint-strict test index search answer evaluate
 

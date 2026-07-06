@@ -143,6 +143,24 @@ def extract_segment(
     """
     full_path = Path(repo_path) / file_path
     if not full_path.exists():
+        if "data/raw/vllm-0.10.1/" in file_path:
+            alt_path = Path(repo_path) / file_path.replace("data/raw/vllm-0.10.1/", "data/raw/vllm-0.10.1/vllm/")
+            if alt_path.exists():
+                full_path = alt_path
+            else:
+                alt_path = Path(repo_path) / file_path.replace("data/raw/vllm-0.10.1/", "data/row/vllm-0.10.1/vllm/")
+                if alt_path.exists():
+                    full_path = alt_path
+        elif "data/row/vllm-0.10.1/" in file_path:
+            alt_path = Path(repo_path) / file_path.replace("data/row/vllm-0.10.1/", "data/raw/vllm-0.10.1/vllm/")
+            if alt_path.exists():
+                full_path = alt_path
+            else:
+                alt_path = Path(repo_path) / file_path.replace("data/row/vllm-0.10.1/", "data/row/vllm-0.10.1/vllm/")
+                if alt_path.exists():
+                    full_path = alt_path
+
+    if not full_path.exists():
         logger.warning(
             "File not found: %s (resolved: %s)", file_path, full_path
         )
@@ -339,13 +357,37 @@ def evaluate_single_question(
     sources_expected = len(ground_truth.sources)
     sources_found = 0
 
-    for retrieved in student_result.retrieved_sources:
-        if is_source_found(
-            retrieved,
-            ground_truth.sources,
-            overlap_threshold,
+    # Extract all ground truth segments
+    gt_segments = []
+    for gt in ground_truth.sources:
+        gt_seg = extract_segment(
+            gt.file_path,
+            gt.first_character_index,
+            gt.last_character_index,
             repo_path,
-        ):
+        )
+        gt_segments.append(gt_seg)
+
+    # Check which ground truth sources were retrieved
+    for gt_seg in gt_segments:
+        if gt_seg is None:
+            continue
+        matched = False
+        for retrieved in student_result.retrieved_sources:
+            retrieved_segment = extract_segment(
+                retrieved.file_path,
+                retrieved.first_character_index,
+                retrieved.last_character_index,
+                repo_path,
+            )
+            if retrieved_segment is None:
+                continue
+
+            overlap = calculate_overlap_ratio(retrieved_segment, gt_seg)
+            if overlap >= overlap_threshold:
+                matched = True
+                break
+        if matched:
             sources_found += 1
 
     recall = (

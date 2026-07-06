@@ -30,8 +30,12 @@ class RagDataset(BaseModel):
 
 class MinimalSearchResults(BaseModel):
     question_id: str
-    question: str
+    question: str = Field(alias="question_str")
     retrieved_sources: List[MinimalSource]
+
+    model_config = {
+        "populate_by_name": True
+    }
 
 
 class MinimalAnswer(MinimalSearchResults):
