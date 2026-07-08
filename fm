@@ -1,0 +1,23 @@
+#!/bin/bash
+# fm: Lint the workspace using flake8 followed by mypy strict.
+
+echo "Running Flake8..."
+uv run python -m flake8 src/
+FLAKE8_EXIT=$?
+
+if [ $FLAKE8_EXIT -ne 0 ]; then
+    echo "Flake8 failed! Aborting."
+    exit $FLAKE8_EXIT
+fi
+
+echo "Running Mypy strict..."
+uv run python -m mypy src/ --strict
+MYPY_EXIT=$?
+
+if [ $MYPY_EXIT -eq 0 ]; then
+    echo "All checks passed successfully!"
+else
+    echo "Mypy failed!"
+fi
+
+exit $MYPY_EXIT

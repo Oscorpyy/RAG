@@ -1,3 +1,4 @@
+SRC_DIR = src
 
 # Colors
 COLOR_RESET = \033[0m
