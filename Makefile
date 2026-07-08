@@ -83,6 +83,8 @@ clean:
 	@find . -type f -name "*.log" -delete
 	@find . -type d -name ".mypy_cache" -exec rm -rf {} +
 	@rm -rf data/processed
+	@rm -rf data/output
+	@rm -rf data/*.json
 	@rm -rf .venv
 	@printf "$(COLOR_GREEN)✓ Cleanup completed$(COLOR_RESET)\n"
 
