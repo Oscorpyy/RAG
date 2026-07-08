@@ -1,13 +1,13 @@
 {
   "metrics": {
     "total_questions": 100,
-    "total_sources_found": 76,
+    "total_sources_found": 89,
     "total_sources_expected": 100,
-    "recall_at_1": 0.76,
-    "recall_at_3": 0.76,
-    "recall_at_5": 0.76,
-    "recall_at_10": 0.76,
-    "average_recall": 0.76
+    "recall_at_1": 0.64,
+    "recall_at_3": 0.77,
+    "recall_at_5": 0.83,
+    "recall_at_10": 0.89,
+    "average_recall": 0.7825
   },
   "evaluations": [
     {
@@ -125,9 +125,9 @@
     {
       "question_id": "d7e28c25-761b-48a0-ade1-a5e459999fe2",
       "question": "What is stored in the logits array during the qk_max calculation in vLLM's paged attention implementation?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -157,9 +157,9 @@
     {
       "question_id": "598c5d47-56a5-4cc6-8c01-fab2b02c221d",
       "question": "How do you pass audio inputs to vLLM for multimodal inference?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -197,9 +197,9 @@
     {
       "question_id": "d1501d52-b446-4c93-b66e-bea705efbe94",
       "question": "What git commit should I checkout when installing Triton flash attention for ROCm with vLLM?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -213,9 +213,9 @@
     {
       "question_id": "d56e34ca-85e9-4199-b4b7-24f6440318f5",
       "question": "How can you check if a model is natively supported in vLLM?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -253,9 +253,9 @@
     {
       "question_id": "87790ff0-09f3-4aa6-8f8e-83180ded4c40",
       "question": "What is the minimum version of bitsandbytes required for vLLM quantization?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -269,33 +269,33 @@
     {
       "question_id": "2d8e04da-8f89-4654-bc2d-118a3aa3512e",
       "question": "What is the primary motivation behind the Modular Kernel framework in vLLM's FusedMoE implementation?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
       "question_id": "8e131a8f-7466-42a7-bd76-a1bb5f32f988",
       "question": "How many inner iterations does a warp need to handle a whole block of value tokens in vLLM's paged attention when BLOCK_SIZE is 16, V_VEC_SIZE is 8, HEAD_SIZE is 128, and WARP_SIZE is 32?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
       "question_id": "2fca0ee8-4ffa-4d5a-a15d-cce139f08f38",
       "question": "What endpoint does vLLM use to expose production metrics?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
       "question_id": "2a165588-2d3d-4d50-9516-0efa08fd7900",
       "question": "How do you build and install vLLM from source for AWS Neuron?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -405,9 +405,9 @@
     {
       "question_id": "7f0cb10b-945c-482b-9ba7-100c39d9c64b",
       "question": "How do you uninstall a vLLM deployment using Helm?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -421,25 +421,25 @@
     {
       "question_id": "f91d4c7f-8bda-4cdf-8613-fc746027dadd",
       "question": "How do you serve a model with audio input support in vLLM?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
       "question_id": "070dd694-1d93-473d-8d04-3ac50689b023",
       "question": "How do you add support for a new reasoning model in vLLM?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
       "question_id": "85e0249b-06ff-4e2a-a0fc-336dc1cbe5f8",
       "question": "What shape must multimodal embeddings have when returned from get_multimodal_embeddings in vLLM multimodal models?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -501,9 +501,9 @@
     {
       "question_id": "9423895e-b4b2-4844-ba61-c818f2c48f27",
       "question": "What tool calling format does vLLM support for Llama 3.1 and 3.2 models?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -525,9 +525,9 @@
     {
       "question_id": "efa50722-19a6-44a2-ab89-e554eb436899",
       "question": "What model architectures does vLLM support for GPT-2 models?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -557,9 +557,9 @@
     {
       "question_id": "54e177d5-9249-4653-b6ea-175de7f7411f",
       "question": "How does vLLM handle sharding and quantization of model weights during initialization?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -573,9 +573,9 @@
     {
       "question_id": "99f0b809-1905-4f24-82e6-fa7c7866418d",
       "question": "What models are currently covered in vLLM's end-to-end performance validation before each release?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -589,9 +589,9 @@
     {
       "question_id": "d8a776b1-adb4-428b-8e81-306998a43554",
       "question": "What is the minimum vLLM version required for P2P NCCL connector functionality?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -605,17 +605,17 @@
     {
       "question_id": "5a5189ea-56a8-40ea-a338-94322a242135",
       "question": "How do you configure data parallel deployment in vLLM?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
       "question_id": "d5df4835-9245-47ba-b9c5-28e690f70c85",
       "question": "What CUDA architectures are supported for Marlin MOE kernels in vLLM?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -661,9 +661,9 @@
     {
       "question_id": "3ea21165-0dc8-460f-9353-35c42abc69f1",
       "question": "What are the two ways to format input when making requests to vLLM's classify endpoint?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -685,9 +685,9 @@
     {
       "question_id": "1c8c4c31-340c-413e-a6eb-7010f2c10e8b",
       "question": "Which vLLM model architectures support LoRA fine-tuning?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -709,9 +709,9 @@
     {
       "question_id": "de2f7646-a182-4d9b-8fb0-b9edf7ce47e9",
       "question": "What is Reinforcement Learning from Human Feedback (RLHF)?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -765,9 +765,9 @@
     {
       "question_id": "32302028-1ea8-40ae-87d6-db98e83f7e49",
       "question": "How can you limit the number of compilation jobs when building vLLM to avoid system overload?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -789,9 +789,9 @@
     {
       "question_id": "b5191cd4-9b74-4211-9e60-6272498deae3",
       "question": "How do you apply chat templates to prompts in vLLM?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {

@@ -94,36 +94,48 @@ class QuestionEvaluation(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def calculate_overlap_ratio(seg_a: str, seg_b: str) -> float:
+def calculate_overlap_ratio(
+    retrieved: MinimalSource,
+    ground_truth: MinimalSource,
+) -> float:
     """
-    Calculate character overlap ratio between two text segments.
+    Calculate the positional character overlap ratio between two source
+    segments **from the same file**.
 
-    Uses the intersection of character sets divided by the minimum length
-    to get a simple overlap percentage. This captures semantic proximity.
+    Definition (from the project spec) :
+        overlap = max(0, min(ret.last, gt.last) - max(ret.first, gt.first))
+        shorter = min(ret.length, gt.length)
+        ratio   = overlap / shorter
+
+    This is a pure index-arithmetic check — no file I/O required.
+    Two segments from different files always return 0.0.
 
     Args:
-        seg_a: First segment.
-        seg_b: Second segment.
+        retrieved:    Retrieved MinimalSource.
+        ground_truth: Ground-truth MinimalSource.
 
     Returns:
-        Overlap ratio (0.0 to 1.0).
+        Overlap ratio in [0.0, 1.0].
     """
-    if not seg_a or not seg_b:
+    if retrieved.file_path != ground_truth.file_path:
         return 0.0
 
-    len_a = len(seg_a)
-    len_b = len(seg_b)
-    min_len = min(len_a, len_b)
-
-    if min_len == 0:
+    shorter = min(
+        retrieved.last_character_index - retrieved.first_character_index,
+        ground_truth.last_character_index - ground_truth.first_character_index,
+    )
+    if shorter <= 0:
         return 0.0
 
-    # Count common characters (order-independent)
-    set_a = set(seg_a)
-    set_b = set(seg_b)
-    intersection = len(set_a & set_b)
-
-    return intersection / min_len
+    overlap = max(
+        0,
+        min(retrieved.last_character_index, ground_truth.last_character_index)
+        - max(
+            retrieved.first_character_index,
+            ground_truth.first_character_index,
+        ),
+    )
+    return overlap / shorter
 
 
 def extract_segment(
@@ -143,22 +155,20 @@ def extract_segment(
     """
     full_path = Path(repo_path) / file_path
     if not full_path.exists():
-        if "data/raw/vllm-0.10.1/" in file_path:
-            alt_path = Path(repo_path) / file_path.replace("data/raw/vllm-0.10.1/", "data/raw/vllm-0.10.1/vllm/")
-            if alt_path.exists():
-                full_path = alt_path
-            else:
-                alt_path = Path(repo_path) / file_path.replace("data/raw/vllm-0.10.1/", "data/row/vllm-0.10.1/vllm/")
+        _prefixes = [
+            ("data/raw/vllm-0.10.1/", "data/raw/vllm-0.10.1/vllm/"),
+            ("data/raw/vllm-0.10.1/", "data/row/vllm-0.10.1/vllm/"),
+            ("data/row/vllm-0.10.1/", "data/raw/vllm-0.10.1/vllm/"),
+            ("data/row/vllm-0.10.1/", "data/row/vllm-0.10.1/vllm/"),
+        ]
+        for src_prefix, dst_prefix in _prefixes:
+            if src_prefix in file_path:
+                alt_path = Path(repo_path) / file_path.replace(
+                    src_prefix, dst_prefix
+                )
                 if alt_path.exists():
                     full_path = alt_path
-        elif "data/row/vllm-0.10.1/" in file_path:
-            alt_path = Path(repo_path) / file_path.replace("data/row/vllm-0.10.1/", "data/raw/vllm-0.10.1/vllm/")
-            if alt_path.exists():
-                full_path = alt_path
-            else:
-                alt_path = Path(repo_path) / file_path.replace("data/row/vllm-0.10.1/", "data/row/vllm-0.10.1/vllm/")
-                if alt_path.exists():
-                    full_path = alt_path
+                    break
 
     if not full_path.exists():
         logger.warning(
@@ -188,49 +198,28 @@ def is_source_found(
     retrieved: MinimalSource,
     ground_truth_sources: list[MinimalSource],
     threshold: float,
-    repo_path: str,
+    repo_path: str = "",  # kept for API compatibility, no longer used
 ) -> bool:
     """
     Check if a retrieved source overlaps with any ground-truth source.
 
-    A source is considered "found" if the character overlap ratio with
-    at least one ground-truth source meets or exceeds the threshold.
+    Uses positional index arithmetic (no file I/O): a retrieved segment
+    is considered "found" if it overlaps a ground-truth segment on the
+    same file by at least threshold of the shorter segment length.
 
     Args:
-        retrieved:           Retrieved source to validate.
-        ground_truth_sources: List of ground-truth sources for the question.
-        threshold:           Minimum overlap ratio (default 0.05 = 5%).
-        repo_path:           Root path to extract segments from.
+        retrieved:            Retrieved source to validate.
+        ground_truth_sources: Ground-truth sources for the question.
+        threshold:            Minimum overlap ratio (default 0.05 = 5%).
+        repo_path:            Unused — kept for backward compatibility.
 
     Returns:
-        True if found (overlap >= threshold with any ground-truth source).
+        True if overlap >= threshold with at least one ground-truth source.
     """
-    retrieved_segment = extract_segment(
-        retrieved.file_path,
-        retrieved.first_character_index,
-        retrieved.last_character_index,
-        repo_path,
+    return any(
+        calculate_overlap_ratio(retrieved, gt) >= threshold
+        for gt in ground_truth_sources
     )
-
-    if retrieved_segment is None:
-        return False
-
-    for ground_truth in ground_truth_sources:
-        gt_segment = extract_segment(
-            ground_truth.file_path,
-            ground_truth.first_character_index,
-            ground_truth.last_character_index,
-            repo_path,
-        )
-
-        if gt_segment is None:
-            continue
-
-        overlap = calculate_overlap_ratio(retrieved_segment, gt_segment)
-        if overlap >= threshold:
-            return True
-
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -355,40 +344,14 @@ def evaluate_single_question(
         QuestionEvaluation with recall score.
     """
     sources_expected = len(ground_truth.sources)
-    sources_found = 0
 
-    # Extract all ground truth segments
-    gt_segments = []
-    for gt in ground_truth.sources:
-        gt_seg = extract_segment(
-            gt.file_path,
-            gt.first_character_index,
-            gt.last_character_index,
-            repo_path,
-        )
-        gt_segments.append(gt_seg)
-
-    # Check which ground truth sources were retrieved
-    for gt_seg in gt_segments:
-        if gt_seg is None:
-            continue
-        matched = False
-        for retrieved in student_result.retrieved_sources:
-            retrieved_segment = extract_segment(
-                retrieved.file_path,
-                retrieved.first_character_index,
-                retrieved.last_character_index,
-                repo_path,
-            )
-            if retrieved_segment is None:
-                continue
-
-            overlap = calculate_overlap_ratio(retrieved_segment, gt_seg)
-            if overlap >= overlap_threshold:
-                matched = True
-                break
-        if matched:
-            sources_found += 1
+    # For each GT source, check if ANY retrieved source covers it
+    # (pure index arithmetic — no file I/O)
+    sources_found = sum(
+        1
+        for gt in ground_truth.sources
+        if is_source_found(gt, student_result.retrieved_sources, overlap_threshold)
+    )
 
     recall = (
         sources_found / sources_expected if sources_expected > 0 else 1.0
@@ -426,6 +389,12 @@ def evaluate_dataset(
     total_sources_found = 0
     total_sources_expected = 0
 
+    # Per-k accumulators: Recall@k = mean over questions of
+    #   |{gt_src : any ret_src[:k] hits gt_src}| / |gt_sources|
+    k_values = [1, 3, 5, 10]
+    recall_sums: dict[int, float] = {k: 0.0 for k in k_values}
+    n_evaluated = 0
+
     pbar = tqdm(
         student_results.search_results,
         desc="Evaluating",
@@ -441,6 +410,8 @@ def evaluate_dataset(
             continue
 
         gt = ground_truth[student_result.question_id]
+
+        # Evaluate at max k (for the QuestionEvaluation record)
         evaluation = evaluate_single_question(
             student_result,
             gt,
@@ -451,17 +422,39 @@ def evaluate_dataset(
         total_sources_found += evaluation.sources_found
         total_sources_expected += evaluation.sources_expected
 
-    # Calculate recall@k
-    if evaluations:
-        avg_recall = sum(e.recall for e in evaluations) / len(evaluations)
-    else:
-        avg_recall = 0.0
+        # Compute Recall@k for each cutoff on this question
+        sources_expected = len(gt.sources)
+        all_retrieved = student_result.retrieved_sources
+        for k in k_values:
+            top_k = all_retrieved[:k]
+            if sources_expected == 0:
+                recall_k = 1.0
+            else:
+                found_k = sum(
+                    1
+                    for gt_src in gt.sources
+                    if is_source_found(
+                        gt_src, top_k, overlap_threshold
+                    )
+                )
+                recall_k = found_k / sources_expected
+            recall_sums[k] += recall_k
+
+        n_evaluated += 1
+
+    def _mean(k: int) -> float:
+        return recall_sums[k] / n_evaluated if n_evaluated > 0 else 0.0
+
+    avg_recall = (
+        sum(_mean(k) for k in k_values) / len(k_values)
+        if n_evaluated > 0 else 0.0
+    )
 
     metrics = RecallMetrics(
-        recall_at_1=avg_recall,  # Approximation; for exact need k info
-        recall_at_3=avg_recall,
-        recall_at_5=avg_recall,
-        recall_at_10=avg_recall,
+        recall_at_1=_mean(1),
+        recall_at_3=_mean(3),
+        recall_at_5=_mean(5),
+        recall_at_10=_mean(10),
         average_recall=avg_recall,
         total_questions=len(evaluations),
         total_sources_found=total_sources_found,
@@ -507,10 +500,10 @@ def print_evaluation_summary(
     print(f"   Average Recall         : {metrics.average_recall:.2%}")
 
     if target_recall is not None:
-        status = "✅" if metrics.average_recall >= target_recall else "❌"
+        status = "✅" if metrics.recall_at_5 >= target_recall else "❌"
         print(
             f"\n{status} Target (>= {target_recall:.0%})"
-            f"  : {metrics.average_recall:.2%}"
+            f"  : {metrics.recall_at_5:.2%}"
         )
 
     print("\n" + "=" * 70)
@@ -661,7 +654,7 @@ class EvaluationCLI:
         if output_path:
             save_evaluation_results(evaluations, metrics, output_path)
 
-        print(f"\n⏱️  Evaluation completed in {elapsed:.2f}s\n")
+        print(f"\n⏱  Evaluation completed in {elapsed:.2f}s\n")
 
 
 if __name__ == "__main__":

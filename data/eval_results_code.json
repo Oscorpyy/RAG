@@ -1,29 +1,29 @@
 {
   "metrics": {
     "total_questions": 100,
-    "total_sources_found": 73,
+    "total_sources_found": 59,
     "total_sources_expected": 100,
-    "recall_at_1": 0.73,
-    "recall_at_3": 0.73,
-    "recall_at_5": 0.73,
-    "recall_at_10": 0.73,
-    "average_recall": 0.73
+    "recall_at_1": 0.31,
+    "recall_at_3": 0.45,
+    "recall_at_5": 0.52,
+    "recall_at_10": 0.59,
+    "average_recall": 0.4675
   },
   "evaluations": [
     {
       "question_id": "189c8b8a-e59c-4fca-92ad-c02df42cbe40",
       "question": "What activation formats does the fused batched MoE layer return in vLLM?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
       "question_id": "02789461-05fd-435d-9673-91606102d6c9",
       "question": "What are the default values for FP8_MIN and FP8_MAX constants in vLLM's triton_flash_attention module?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -37,33 +37,33 @@
     {
       "question_id": "0d29b0e8-686c-41b7-9a48-50f8e4bc63de",
       "question": "What's the default value of trust_remote_code in vLLM's LLM class constructor?",
-      "sources_found": 1,
-      "sources_expected": 1,
-      "recall": 1.0,
-      "k_used": 10
-    },
-    {
-      "question_id": "4235480a-cd9e-42a5-a852-b562386a83a3",
-      "question": "What determines the values in cudagraph_inputs_embeds when capturing CUDA graph shapes in vLLM's ModelRunner?",
       "sources_found": 0,
       "sources_expected": 1,
       "recall": 0.0,
       "k_used": 10
     },
     {
-      "question_id": "6ffdf5f6-fcd3-4d11-8227-8bedd9b33296",
-      "question": "What conditions must be met for vLLM's ModelRunner to use CUDA graphs instead of the regular model?",
+      "question_id": "4235480a-cd9e-42a5-a852-b562386a83a3",
+      "question": "What determines the values in cudagraph_inputs_embeds when capturing CUDA graph shapes in vLLM's ModelRunner?",
       "sources_found": 1,
       "sources_expected": 1,
       "recall": 1.0,
       "k_used": 10
     },
     {
+      "question_id": "6ffdf5f6-fcd3-4d11-8227-8bedd9b33296",
+      "question": "What conditions must be met for vLLM's ModelRunner to use CUDA graphs instead of the regular model?",
+      "sources_found": 0,
+      "sources_expected": 1,
+      "recall": 0.0,
+      "k_used": 10
+    },
+    {
       "question_id": "c854f979-7900-4772-86c6-f95715529e2d",
       "question": "What is the default timeout value for vLLM RPC operations?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -109,9 +109,9 @@
     {
       "question_id": "925270df-9998-43ab-8603-2ef13c809987",
       "question": "What value does _MAX_IMAGE_SIZE use in vLLM's keye model for determining the image size with most features?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -133,9 +133,9 @@
     {
       "question_id": "3be219c4-dec6-4b83-a6e1-39497cf4affd",
       "question": "What are the default values for tensor fields in vLLM's AiterMLAMetadata class?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -149,25 +149,25 @@
     {
       "question_id": "9ab959ff-efa6-4f66-b2f2-5514f61c82d0",
       "question": "What is the shape and structure of the array returned by the KV cache mapping metadata computation function in TPUModelRunner?",
-      "sources_found": 0,
-      "sources_expected": 1,
-      "recall": 0.0,
-      "k_used": 10
-    },
-    {
-      "question_id": "f30cdb97-7bbd-469d-8cdf-3b5c50416007",
-      "question": "What is the default value of the z parameter in the selective_state_update function call in vLLM's mamba_mixer2.py?",
       "sources_found": 1,
       "sources_expected": 1,
       "recall": 1.0,
       "k_used": 10
     },
     {
-      "question_id": "c1da62cd-07b5-4f25-8556-c8b33774b4f4",
-      "question": "What block size divisibility requirement does HybridKVCacheCoordinator enforce when caching is enabled?",
+      "question_id": "f30cdb97-7bbd-469d-8cdf-3b5c50416007",
+      "question": "What is the default value of the z parameter in the selective_state_update function call in vLLM's mamba_mixer2.py?",
       "sources_found": 0,
       "sources_expected": 1,
       "recall": 0.0,
+      "k_used": 10
+    },
+    {
+      "question_id": "c1da62cd-07b5-4f25-8556-c8b33774b4f4",
+      "question": "What block size divisibility requirement does HybridKVCacheCoordinator enforce when caching is enabled?",
+      "sources_found": 1,
+      "sources_expected": 1,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -181,17 +181,17 @@
     {
       "question_id": "4830d85c-33a2-4cef-a1cc-9ccad3e8b51b",
       "question": "What exception is raised when pixel_values has incorrect number of channels in InternS1VisionEmbeddings forward method?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
       "question_id": "937a3e70-2b84-4431-8cb3-08e01991710f",
       "question": "What does the HunyuanA13BReasoningParser return when reasoning_content or response_content has zero length?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -205,9 +205,9 @@
     {
       "question_id": "c593f6af-5d7c-472c-91f1-39020982d9d4",
       "question": "What are all the registered KV connector names in vLLM's KVConnectorFactory?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -229,9 +229,9 @@
     {
       "question_id": "9495e881-8b94-4f72-8273-93f5b6ddd335",
       "question": "What happens when depths parameter is passed as a string in OvisConfig?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -245,33 +245,33 @@
     {
       "question_id": "495d3729-74d3-4263-b7e6-89dbdca55574",
       "question": "What is the return type annotation for the _apply_matches function in vLLM's multimodal processing module?",
-      "sources_found": 1,
-      "sources_expected": 1,
-      "recall": 1.0,
-      "k_used": 10
-    },
-    {
-      "question_id": "9f1db215-19ff-4475-bdd5-dd7caf6bf807",
-      "question": "What are the default percentiles calculated for ITL and E2EL metrics in vLLM's serve benchmark?",
-      "sources_found": 1,
-      "sources_expected": 1,
-      "recall": 1.0,
-      "k_used": 10
-    },
-    {
-      "question_id": "1d220c05-3d71-4af7-95f8-fca998bade77",
-      "question": "What happens when min_dynamic_patch is None in InternVL's initialization?",
       "sources_found": 0,
       "sources_expected": 1,
       "recall": 0.0,
       "k_used": 10
     },
     {
-      "question_id": "fd5cc0f3-ab99-4dcd-8c00-78459828605a",
-      "question": "What is the default value of _is_remote_reader in vLLM's shared memory broadcast implementation?",
+      "question_id": "9f1db215-19ff-4475-bdd5-dd7caf6bf807",
+      "question": "What are the default percentiles calculated for ITL and E2EL metrics in vLLM's serve benchmark?",
+      "sources_found": 0,
+      "sources_expected": 1,
+      "recall": 0.0,
+      "k_used": 10
+    },
+    {
+      "question_id": "1d220c05-3d71-4af7-95f8-fca998bade77",
+      "question": "What happens when min_dynamic_patch is None in InternVL's initialization?",
       "sources_found": 1,
       "sources_expected": 1,
       "recall": 1.0,
+      "k_used": 10
+    },
+    {
+      "question_id": "fd5cc0f3-ab99-4dcd-8c00-78459828605a",
+      "question": "What is the default value of _is_remote_reader in vLLM's shared memory broadcast implementation?",
+      "sources_found": 0,
+      "sources_expected": 1,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -293,9 +293,9 @@
     {
       "question_id": "9d2dd3eb-e569-46ea-a9d5-dea4bb6055e6",
       "question": "What happens if you try to call patch_tensor_parallel_group when the tensor parallel state is already patched?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -317,9 +317,9 @@
     {
       "question_id": "e9157a40-4465-4de7-bd4d-033b4c173493",
       "question": "What is the requires_grad value set for parameters in GPTQMarlin24's process_weights_after_loading method?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -373,9 +373,9 @@
     {
       "question_id": "409b78bd-dafb-46b1-b453-3d16a1ae058b",
       "question": "What are the supported bit values for W4A16Sparse24 quantization in vLLM's compressed tensors?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -389,9 +389,9 @@
     {
       "question_id": "67acae76-ee3b-46c1-a287-044c71fc78ac",
       "question": "What quantization methods are supported for Mixtral models in vLLM?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -405,9 +405,9 @@
     {
       "question_id": "16deace0-4e51-4c3d-8f04-ffeadc97a2c3",
       "question": "What is the default value of pp_locks in RayDistributedExecutor?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -429,9 +429,9 @@
     {
       "question_id": "f1fb35e6-1a65-48e1-8c99-f5e25df6f00c",
       "question": "What is the default data type for indices_type parameter in the routing simulator's expert selection method?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -445,9 +445,9 @@
     {
       "question_id": "4d752f03-1006-4df9-9fde-98b947c79f66",
       "question": "What is the default value of the pin_memory parameter in MultiModalKwargs._try_stack method?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -469,25 +469,25 @@
     {
       "question_id": "9024881e-e178-462f-8435-7fc4609da96a",
       "question": "What happens when the residual parameter is None in Gemma2DecoderLayer's forward method?",
+      "sources_found": 1,
+      "sources_expected": 1,
+      "recall": 1.0,
+      "k_used": 10
+    },
+    {
+      "question_id": "a1660e69-44a1-48da-a2a7-5a84be305016",
+      "question": "What is the default value of the spec_step_index parameter in DeepSeekMultiTokenPredictor's forward method?",
       "sources_found": 0,
       "sources_expected": 1,
       "recall": 0.0,
       "k_used": 10
     },
     {
-      "question_id": "a1660e69-44a1-48da-a2a7-5a84be305016",
-      "question": "What is the default value of the spec_step_index parameter in DeepSeekMultiTokenPredictor's forward method?",
-      "sources_found": 1,
-      "sources_expected": 1,
-      "recall": 1.0,
-      "k_used": 10
-    },
-    {
       "question_id": "22018181-e293-4308-8289-ecfaac26406f",
       "question": "What happens when a reshape operation in vLLM's noop elimination has more than one -1 in the shape parameter?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -517,9 +517,9 @@
     {
       "question_id": "cb7cbccd-ab96-4695-9c7a-9197e6b254a8",
       "question": "What is the default value for apply_router_weight_on_input parameter in the DeepGemm MoE kernel function call?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -533,25 +533,25 @@
     {
       "question_id": "a96c1a73-d5d0-4599-85ac-9dd74c52c20f",
       "question": "What is the default value of inputs_embeds parameter in DeepSeek model's forward method?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
       "question_id": "94ade925-c345-413f-8410-48cf17c65b99",
       "question": "What prefixes does the AutoWeightsLoader skip in MiniCPM Eagle model when tie_word_embeddings is True?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
       "question_id": "eea9e938-c8f8-4a7a-b262-66e81e9a0201",
       "question": "What are all the NVML GPU instance profile constants defined in vLLM's pynvml module?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -573,9 +573,9 @@
     {
       "question_id": "df39833c-7c8c-4e82-b6fd-a66f3b8ce929",
       "question": "What is the default value for engine_id when creating connectors in MultiKVConnector?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -589,9 +589,9 @@
     {
       "question_id": "d40d1b96-89d9-49b0-b2bb-85202cb491f3",
       "question": "What are some of the test model names used in vLLM's test_utils.py for testing different model types and quantization methods?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -605,9 +605,9 @@
     {
       "question_id": "8e79a26d-0035-449d-9fb8-e50ac242396a",
       "question": "What is the default value for the intermediate_tensors parameter in GranitemoehybridForCausalLM's forward method?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -637,33 +637,33 @@
     {
       "question_id": "6adb31ac-4f50-4dc4-8383-47b6c47a3a3f",
       "question": "What is the default lora_int_id value when lora_request is None in vLLM's sequence?",
-      "sources_found": 1,
-      "sources_expected": 1,
-      "recall": 1.0,
-      "k_used": 10
-    },
-    {
-      "question_id": "5cd305eb-6726-4663-a730-441d0060daf4",
-      "question": "What condition must be met for prompt_tokens_details to be included in the final usage info in vLLM's completion serving?",
-      "sources_found": 1,
-      "sources_expected": 1,
-      "recall": 1.0,
-      "k_used": 10
-    },
-    {
-      "question_id": "30622359-490d-493a-8f1c-6f05f80bc91b",
-      "question": "What happens to input_ids when inputs_embeds is None in LlaVA-NeXT-Video's forward pass?",
       "sources_found": 0,
       "sources_expected": 1,
       "recall": 0.0,
       "k_used": 10
     },
     {
-      "question_id": "ce1a4fb2-2386-462d-9e53-7c343d769c9a",
-      "question": "What environment variable does vLLM's collect_env.py check as a fallback when CUDNN library detection fails?",
+      "question_id": "5cd305eb-6726-4663-a730-441d0060daf4",
+      "question": "What condition must be met for prompt_tokens_details to be included in the final usage info in vLLM's completion serving?",
+      "sources_found": 0,
+      "sources_expected": 1,
+      "recall": 0.0,
+      "k_used": 10
+    },
+    {
+      "question_id": "30622359-490d-493a-8f1c-6f05f80bc91b",
+      "question": "What happens to input_ids when inputs_embeds is None in LlaVA-NeXT-Video's forward pass?",
       "sources_found": 1,
       "sources_expected": 1,
       "recall": 1.0,
+      "k_used": 10
+    },
+    {
+      "question_id": "ce1a4fb2-2386-462d-9e53-7c343d769c9a",
+      "question": "What environment variable does vLLM's collect_env.py check as a fallback when CUDNN library detection fails?",
+      "sources_found": 0,
+      "sources_expected": 1,
+      "recall": 0.0,
       "k_used": 10
     },
     {
@@ -677,17 +677,17 @@
     {
       "question_id": "b7a33ae4-5232-47be-b8fc-9370be3ab073",
       "question": "What are the dimensions and data types of the tensors returned by get_inputs method in LastAllReduceRMSNormPattern?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
       "question_id": "3c524f7f-48dd-49f2-95a6-a668f6d5af26",
       "question": "Can draft_probs be None in vLLM's rejection sampler and when does this happen?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -741,9 +741,9 @@
     {
       "question_id": "da1e13f1-5be1-4854-ac7c-4ee8f6508469",
       "question": "What's the default value of min_stats_update_interval_ms in DPCoordinatorProc's __init__ method?",
-      "sources_found": 0,
+      "sources_found": 1,
       "sources_expected": 1,
-      "recall": 0.0,
+      "recall": 1.0,
       "k_used": 10
     },
     {
@@ -797,9 +797,9 @@
     {
       "question_id": "5ff8e342-b4e2-45e1-9ef0-990915c5bb1f",
       "question": "What is the default timeout value for VLLM_RPC_TIMEOUT environment variable?",
-      "sources_found": 1,
+      "sources_found": 0,
       "sources_expected": 1,
-      "recall": 1.0,
+      "recall": 0.0,
       "k_used": 10
     },
     {
