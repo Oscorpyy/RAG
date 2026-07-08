@@ -1,19 +1,17 @@
 import fire
 from .ingestion import IngestionCLI
 from .retrieval import RetrievalCLI
+from .generation import GenerationCLI
 
 
-def answer(*args, **kwargs):
-    print("Answer step skipped for now.")
-
-
-def main():
+def main() -> None:
     fire.Fire({
         "index": IngestionCLI().index,
         "search": RetrievalCLI().search,
         "search_dataset": RetrievalCLI().search_dataset,
         "search_datasets": RetrievalCLI().search_datasets,
-        "answer_dataset": answer,
+        "answer_dataset": GenerationCLI().answer_dataset,
+        "answer": GenerationCLI().answer,
     })
 
 

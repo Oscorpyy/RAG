@@ -30,6 +30,7 @@ import logging
 import time
 from pathlib import Path
 
+from typing import Any
 import bm25s
 from tqdm import tqdm
 
@@ -57,11 +58,21 @@ logger = logging.getLogger(__name__)
 # Chemin absolu du dossier racine du projet (rag/)
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 
-DEFAULT_INDEX_DIR: str = str(PROJECT_ROOT / "data" / "processed")
+DEFAULT_INDEX_DIR: str = str(
+    PROJECT_ROOT / "data" / "processed"
+)
 DEFAULT_K: int = 5
-DEFAULT_SEARCH_OUTPUT_DIR: str = str(PROJECT_ROOT / "data" / "output" / "search_results")
-DEFAULT_DOCS_DATASET_PATH: str = "datasets_public/public/UnansweredQuestions/dataset_docs_public.json"
-DEFAULT_CODE_DATASET_PATH: str = "datasets_public/public/UnansweredQuestions/dataset_code_public.json"
+DEFAULT_SEARCH_OUTPUT_DIR: str = str(
+    PROJECT_ROOT / "data" / "output" / "search_results"
+)
+DEFAULT_DOCS_DATASET_PATH: str = (
+    "datasets_public/public/UnansweredQuestions/"
+    "dataset_docs_public.json"
+)
+DEFAULT_CODE_DATASET_PATH: str = (
+    "datasets_public/public/UnansweredQuestions/"
+    "dataset_code_public.json"
+)
 
 # ---------------------------------------------------------------------------
 # Chargement de l'index (API native bm25s — zéro code de désérialisation)
@@ -83,19 +94,21 @@ def load_index(
     retriever = bm25s.BM25.load(str(idx_path), load_corpus=True)
 
     sources: list[MinimalSource] = []
-    
+
     # --- DÉBUT DE LA NOUVELLE LOGIQUE ---
     for doc in retriever.corpus:
         doc_dict = dict(doc)
         raw_path = str(doc_dict["file_path"])
 
-        # 1. Si le chemin absolu contient "data", on coupe tout ce qu'il y a avant
+        # 1. Si le chemin absolu contient "data",
+        # on coupe tout ce qu'il y a avant
         if "data" in Path(raw_path).parts:
             parts = Path(raw_path).parts
             data_index = parts.index("data")
             final_path = Path(*parts[data_index:]).as_posix()
-            
-        # 2. Si le chemin commence directement par "vllm", on préfixe le bon dossier
+
+        # 2. Si le chemin commence directement par "vllm",
+        # on préfixe le bon dossier
         else:
             final_path = f"data/raw/vllm-0.10.1/{raw_path}"
 
@@ -163,7 +176,7 @@ def search(
     )
 
     # results a la forme [[doc_0, doc_1, ...]] (1 ligne = 1 requête)
-    top_docs: list[dict] = results[0].tolist()
+    top_docs: list[dict[str, Any]] = results[0].tolist()
     return [MinimalSource(**doc) for doc in top_docs]
 
 
@@ -270,7 +283,8 @@ def save_results(results: StudentSearchResults, output_path: str) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     with open(out, "w", encoding="utf-8") as fh:
-        json.dump(results.model_dump(by_alias=True), fh, indent=2, ensure_ascii=False)
+        json.dump(results.model_dump(by_alias=True), fh, indent=2,
+                  ensure_ascii=False)
 
     logger.info("Résultats sauvegardés → %s", out)
 
@@ -328,7 +342,7 @@ def run_search_dataset(
         search_results.append(
             MinimalSearchResults(
                 question_id=question.question_id,
-                question=question.question,
+                question_str=question.question,
                 retrieved_sources=top_sources,
             )
         )

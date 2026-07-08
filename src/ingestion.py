@@ -16,7 +16,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Generator, Iterator
+from typing import Generator, Iterator, cast
 import bm25s
 
 from .models import MinimalSource
@@ -420,8 +420,15 @@ def tokenize_query(query: str | list[str]) -> list[list[str]]:
     Returns:
         Liste de listes de tokens, une par requête.
     """
-    return bm25s.tokenize(query, stopwords=None, return_ids=False,
-                          show_progress=False)
+    return cast(
+        list[list[str]],
+        bm25s.tokenize(
+            query,
+            stopwords=None,
+            return_ids=False,
+            show_progress=False,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ Shared Pydantic data models used across ingestion, retrieval and evaluation.
 
 from pydantic import BaseModel, Field
 import uuid
-from typing import List
+from typing import List, Sequence
 
 
 class MinimalSource(BaseModel):
@@ -43,9 +43,9 @@ class MinimalAnswer(MinimalSearchResults):
 
 
 class StudentSearchResults(BaseModel):
-    search_results: List[MinimalSearchResults]
+    search_results: Sequence[MinimalSearchResults]
     k: int
 
 
 class StudentSearchResultsAndAnswer(StudentSearchResults):
-    search_results: List[MinimalAnswer]
+    search_results: Sequence[MinimalAnswer]

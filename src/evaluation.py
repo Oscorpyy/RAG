@@ -350,7 +350,8 @@ def evaluate_single_question(
     sources_found = sum(
         1
         for gt in ground_truth.sources
-        if is_source_found(gt, student_result.retrieved_sources, overlap_threshold)
+        if is_source_found(gt, student_result.retrieved_sources,
+                           overlap_threshold)
     )
 
     recall = (
