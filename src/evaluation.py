@@ -179,7 +179,7 @@ def extract_segment(
     try:
         with open(full_path, "r", encoding="utf-8") as f:
             content = f.read()
-            if end_idx >= len(content):
+            if end_idx > len(content):
                 logger.warning(
                     "Index out of bounds for %s: [%d:%d] vs file len %d",
                     file_path,
@@ -188,7 +188,7 @@ def extract_segment(
                     len(content),
                 )
                 return content[start_idx:]
-            return content[start_idx:end_idx + 1]
+            return content[start_idx:end_idx]
     except (IOError, UnicodeDecodeError) as e:
         logger.warning("Failed to read %s: %s", file_path, e)
         return None

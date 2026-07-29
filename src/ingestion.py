@@ -42,75 +42,69 @@ DEFAULT_INDEX_DIR: str = "data/processed"
 
 
 # ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+
+def make_minimal_source(
+    file_path: str,
+    start_index: int,
+    chunk_content: str,
+    total_file_length: int,
+) -> MinimalSource:
+    """
+    Crée une instance de MinimalSource en garantissant que
+    last_character_index est calculé strictement comme
+    start_index + len(chunk_content) et ne dépasse jamais la longueur
+    totale du fichier.
+    """
+    last_idx = min(start_index + len(chunk_content), total_file_length)
+    return MinimalSource(
+        file_path=file_path,
+        first_character_index=start_index,
+        last_character_index=last_idx,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Chunkers
 # ---------------------------------------------------------------------------
 
 
-def _iter_markdown_chunks(
-    content: str,
+def _split_if_oversized(
+    text: str,
     file_path: str,
+    start: int,
     max_chunk_size: int,
-    overlap: int,
+    overlap: int = 0,
+    total_file_length: int = 0,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Découpe un fichier Markdown en chunks respectant les frontières de
-    paragraphes, avec chevauchement entre chunks consécutifs.
-
-    Stratégie :
-      1. Découper sur les lignes vides (frontières de paragraphes).
-      2. Accumuler les blocs jusqu'à max_chunk_size.
-      3. Reculer le début du chunk suivant de `overlap` caractères pour
-         créer un chevauchement avec le chunk précédent (jamais avant 0,
-         jamais hors du fichier courant).
-      4. Si un bloc seul dépasse max_chunk_size, le découper brutalement
-         (toujours avec le même overlap entre tranches).
-
-    Garanties :
-      - Si len(content) <= max_chunk_size, un seul chunk = le fichier entier.
-      - Un chunk ne dépasse jamais [0, len(content)] (clamp strict).
-      - Un chunk ne contient jamais de texte d'un autre fichier.
-
-    Yields:
-        (MinimalSource, texte_du_chunk)
+    Si le texte dépasse max_chunk_size, le découpe en tranches qui se
+    chevauchent de `overlap` caractères. Sinon, l'émet tel quel.
     """
-    # Cas trivial : le fichier entier tient dans un seul chunk
-    if len(content) <= max_chunk_size:
-        yield MinimalSource(
-            file_path=file_path,
-            first_character_index=0,
-            last_character_index=max(0, len(content) - 1),
-        ), content
+    if total_file_length <= 0:
+        total_file_length = start + len(text)
+
+    if len(text) <= max_chunk_size:
+        yield make_minimal_source(
+            file_path, start, text, total_file_length
+        ), text
         return
 
-    paragraphs: list[tuple[int, str]] = []
-    current_pos: int = 0
-    for line in content.splitlines(keepends=True):
-        paragraphs.append((current_pos, line))
-        current_pos += len(line)
+    step = max(1, max_chunk_size - overlap)
+    pos: int = 0
+    text_len = len(text)
 
-    # Fusion des lignes en blocs séparés par des lignes vides
-    blocks: list[tuple[int, int, str]] = []
-    block_lines: list[str] = []
-    block_pos: int = 0
-
-    for start_idx, line in paragraphs:
-        if line.strip() == "" and block_lines:
-            block_text = "".join(block_lines)
-            blocks.append((block_pos, block_pos + len(block_text), block_text))
-            block_lines = []
-            block_pos = start_idx + len(line)
-        else:
-            if not block_lines:
-                block_pos = start_idx
-            block_lines.append(line)
-
-    if block_lines:
-        block_text = "".join(block_lines)
-        blocks.append((block_pos, block_pos + len(block_text), block_text))
-
-    yield from _accumulate_with_overlap(
-        blocks, content, file_path, max_chunk_size, overlap
-    )
+    while pos < text_len:
+        slice_end = min(pos + max_chunk_size, text_len)
+        slice_text = text[pos:slice_end]
+        yield make_minimal_source(
+            file_path, start + pos, slice_text, total_file_length
+        ), slice_text
+        if slice_end >= text_len:
+            break
+        pos += step
 
 
 def _accumulate_with_overlap(
@@ -121,24 +115,8 @@ def _accumulate_with_overlap(
     overlap: int,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Accumule des blocs (paragraphes ou nœuds AST) en chunks avec
-    chevauchement contrôlé entre chunks consécutifs.
-
-    Quand l'accumulation dépasse max_chunk_size, le chunk courant est émis,
-    puis le chunk suivant reprend `overlap` caractères avant la fin du
-    chunk précédent — toujours borné à l'intérieur du fichier courant
-    (jamais avant 0).
-
-    Args:
-        blocks:         Liste de (start, end, text) triés par position.
-        content:        Contenu complet du fichier (pour les relectures
-                        lors du calcul de l'overlap).
-        file_path:      Chemin relatif du fichier.
-        max_chunk_size: Taille maximale d'un chunk.
-        overlap:        Nombre de caractères de chevauchement souhaité.
-
-    Yields:
-        (MinimalSource, texte_du_chunk)
+    Accumule des blocs en chunks avec chevauchement contrôlé entre
+    chunks consécutifs.
     """
     if not blocks:
         return
@@ -148,12 +126,12 @@ def _accumulate_with_overlap(
     chunk_text: str = ""
 
     def emit(start: int, end: int) -> Iterator[tuple[MinimalSource, str]]:
-        """Émet un chunk [start:end], en le découpant si > max_chunk_size."""
         start = max(0, min(start, file_len))
         end = max(start, min(end, file_len))
         text = content[start:end]
-        yield from _split_if_oversized(text, file_path, start,
-                                       max_chunk_size, overlap)
+        yield from _split_if_oversized(
+            text, file_path, start, max_chunk_size, overlap, file_len
+        )
 
     for b_start, b_end, b_text in blocks:
         if not chunk_text:
@@ -166,11 +144,7 @@ def _accumulate_with_overlap(
                 end = chunk_start + len(chunk_text)
                 yield from emit(chunk_start, end)
 
-            # Chevauchement : reculer le début du prochain chunk de `overlap`
-            # caractères, sans jamais repasser avant le début du fichier ni
-            # avant le début du chunk précédemment émis (clamp local).
             new_start = max(0, b_start - overlap)
-            new_start = max(new_start, 0)
             chunk_start = new_start
             chunk_text = content[new_start:b_end]
 
@@ -179,43 +153,44 @@ def _accumulate_with_overlap(
         yield from emit(chunk_start, end)
 
 
-def _split_if_oversized(
-    text: str,
+def _iter_markdown_chunks(
+    content: str,
     file_path: str,
-    start: int,
     max_chunk_size: int,
-    overlap: int = 0,
+    overlap: int,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Si le texte dépasse max_chunk_size, le découpe en tranches qui se
-    chevauchent de `overlap` caractères. Sinon, l'émet tel quel.
-
-    Le clamp est strict : aucune tranche ne dépasse [start, start+len(text)],
-    donc jamais au-delà de la fin réelle du contenu fourni.
+    Découpe un fichier Markdown en chunks respectant 100% du contenu du fichier
+    (y compris lignes vides et espaces) sans aucun trou d'index.
     """
-    if len(text) <= max_chunk_size:
-        yield MinimalSource(
-            file_path=file_path,
-            first_character_index=start,
-            last_character_index=start + len(text),
-        ), text
+    file_len = len(content)
+    if file_len <= max_chunk_size:
+        yield make_minimal_source(file_path, 0, content, file_len), content
         return
 
-    step = max(1, max_chunk_size - overlap)
-    pos: int = 0
-    text_len = len(text)
+    blocks: list[tuple[int, int, str]] = []
+    block_lines: list[str] = []
+    block_pos: int = 0
+    current_pos: int = 0
 
-    while pos < text_len:
-        slice_end = min(pos + max_chunk_size, text_len)
-        slice_text = text[pos:slice_end]
-        yield MinimalSource(
-            file_path=file_path,
-            first_character_index=start + pos,
-            last_character_index=start + slice_end - 1,
-        ), slice_text
-        if slice_end >= text_len:
-            break
-        pos += step
+    for line in content.splitlines(keepends=True):
+        if not block_lines:
+            block_pos = current_pos
+        block_lines.append(line)
+        current_pos += len(line)
+
+        if line.strip() == "":
+            block_text = "".join(block_lines)
+            blocks.append((block_pos, block_pos + len(block_text), block_text))
+            block_lines = []
+
+    if block_lines:
+        block_text = "".join(block_lines)
+        blocks.append((block_pos, block_pos + len(block_text), block_text))
+
+    yield from _accumulate_with_overlap(
+        blocks, content, file_path, max_chunk_size, overlap
+    )
 
 
 def _iter_python_chunks(
@@ -225,31 +200,13 @@ def _iter_python_chunks(
     overlap: int,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Découpe un fichier Python en chunks en respectant les frontières de
-    fonctions/classes, avec chevauchement entre chunks consécutifs.
-
-    Stratégie :
-      1. Parser l'AST pour identifier les nœuds top-level.
-      2. Associer chaque nœud à sa plage de caractères via les numéros
-         de ligne.
-      3. Accumuler les nœuds avec le même mécanisme de chevauchement que
-         pour le Markdown (voir `_accumulate_with_overlap`).
-      4. Fallback sur le découpage brut si le parsing AST échoue.
-
-    Garanties identiques à `_iter_markdown_chunks` : fichier entier si
-    plus petit que max_chunk_size, jamais de dépassement hors fichier,
-    jamais de mélange entre fichiers.
-
-    Yields:
-        (MinimalSource, texte_du_chunk)
+    Découpe un fichier Python en chunks en s'appuyant sur l'AST top-level,
+    tout en étendant les blocs pour couvrir 100% des caractères du fichier
+    (commentaires, docstrings, lignes vides entre fonctions).
     """
-    # Cas trivial : le fichier entier tient dans un seul chunk
-    if len(content) <= max_chunk_size:
-        yield MinimalSource(
-            file_path=file_path,
-            first_character_index=0,
-            last_character_index=max(0, len(content) - 1),
-        ), content
+    file_len = len(content)
+    if file_len <= max_chunk_size:
+        yield make_minimal_source(file_path, 0, content, file_len), content
         return
 
     try:
@@ -259,8 +216,9 @@ def _iter_python_chunks(
             "AST parse failed for %s — falling back to brute-force chunking.",
             file_path,
         )
-        yield from _split_if_oversized(content, file_path, 0,
-                                       max_chunk_size, overlap)
+        yield from _split_if_oversized(
+            content, file_path, 0, max_chunk_size, overlap, file_len
+        )
         return
 
     lines: list[str] = content.splitlines(keepends=True)
@@ -280,21 +238,45 @@ def _iter_python_chunks(
         end_char = line_offsets[end_line]
         return start_char, end_char
 
-    top_nodes: list[tuple[int, int, str]] = []
+    raw_ranges: list[tuple[int, int]] = []
     for node in ast.iter_child_nodes(tree):
         rng = node_char_range(node)
-        if rng is None:
-            continue
-        s, e = rng
-        top_nodes.append((s, e, content[s:e]))
+        if rng is not None:
+            raw_ranges.append(rng)
 
-    if not top_nodes:
-        yield from _split_if_oversized(content, file_path, 0,
-                                       max_chunk_size, overlap)
+    if not raw_ranges:
+        yield from _split_if_oversized(
+            content, file_path, 0, max_chunk_size, overlap, file_len
+        )
         return
 
+    blocks: list[tuple[int, int, str]] = []
+    prev_end = 0
+    num_nodes = len(raw_ranges)
+
+    for i, (s, e) in enumerate(raw_ranges):
+        b_start = prev_end
+        if i < num_nodes - 1:
+            next_s = raw_ranges[i + 1][0]
+            b_end = max(e, next_s)
+        else:
+            b_end = file_len
+
+        b_end = min(max(b_start, b_end), file_len)
+        block_text = content[b_start:b_end]
+        if block_text:
+            blocks.append((b_start, b_end, block_text))
+            prev_end = b_end
+
+    if prev_end < file_len:
+        if blocks:
+            last_s, _, _ = blocks[-1]
+            blocks[-1] = (last_s, file_len, content[last_s:file_len])
+        else:
+            blocks.append((0, file_len, content))
+
     yield from _accumulate_with_overlap(
-        top_nodes, content, file_path, max_chunk_size, overlap
+        blocks, content, file_path, max_chunk_size, overlap
     )
 
 
@@ -306,19 +288,11 @@ def _iter_python_chunks(
 def collect_files(repo_path: str) -> Generator[Path, None, None]:
     """
     Parcourt récursivement repo_path et retourne les fichiers .py et .md.
-
-    Args:
-        repo_path: Chemin racine du dépôt à analyser.
-
-    Yields:
-        Chemins de fichiers supportés.
     """
     root = Path(repo_path)
     if not root.exists():
         raise FileNotFoundError(
-            f"Le chemin '{root.resolve()}' n'existe pas. "
-            "As-tu bien cloné le dépôt ? "
-            "(git clone https://github.com/vllm-project/vllm.git)"
+            f"Le chemin '{root.resolve()}' n'existe pas."
         )
     if not root.is_dir():
         raise NotADirectoryError(
@@ -350,16 +324,6 @@ def parse_file(
 ) -> list[tuple[MinimalSource, str]]:
     """
     Lit un fichier et retourne la liste de ses chunks avec métadonnées.
-
-    Args:
-        filepath:       Chemin absolu (ou relatif) vers le fichier.
-        repo_root:      Racine du dépôt, pour calculer le chemin relatif.
-        max_chunk_size: Taille maximale d'un chunk en caractères.
-        overlap:        Chevauchement souhaité entre chunks consécutifs
-                        du même fichier, en caractères.
-
-    Returns:
-        Liste de (MinimalSource, texte_du_chunk).
     """
     relative_path = filepath.relative_to(repo_root).as_posix()
 
@@ -386,40 +350,15 @@ def parse_file(
 
 
 # ---------------------------------------------------------------------------
-# Tokeniseur (réutilisé pour l'indexation et la recherche)
+# Tokeniseur
 # ---------------------------------------------------------------------------
 
 
 def _tokenize_corpus(texts: list[str]) -> bm25s.tokenization.Tokenized:
-    """
-    Tokenise un corpus pour la construction de l'index (`BM25.index`).
-
-    Utilise `return_ids=True` (comportement par défaut de `bm25s.tokenize`) :
-    le résultat est un objet `Tokenized` (ids + vocab) optimisé pour
-    l'indexation, PAS pour interroger un index déjà construit.
-
-    Pas de retrait de stopwords : le corpus est majoritairement du code
-    source où les mots courts comme « if », « in », « is » sont significatifs.
-    """
     return bm25s.tokenize(texts, stopwords=None, show_progress=False)
 
 
 def tokenize_query(query: str | list[str]) -> list[list[str]]:
-    """
-    Tokenise une requête pour l'interroger contre un index déjà chargé.
-
-    IMPORTANT : contrairement à `_tokenize_corpus`, on utilise ici
-    `return_ids=False`. `bm25s.BM25.retrieve()` accepte des tokens texte
-    bruts et les mappe lui-même sur le vocabulaire de l'index chargé ;
-    passer des IDs construits sur un vocabulaire différent (celui d'un
-    tokenizer recréé à la volée) produirait des résultats incorrects.
-
-    Args:
-        query: Une requête (str) ou une liste de requêtes.
-
-    Returns:
-        Liste de listes de tokens, une par requête.
-    """
     return cast(
         list[list[str]],
         bm25s.tokenize(
@@ -432,7 +371,7 @@ def tokenize_query(query: str | list[str]) -> list[list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Indexation BM25 — sérialisation 100% gérée par bm25s
+# Indexation BM25
 # ---------------------------------------------------------------------------
 
 
@@ -440,21 +379,6 @@ def build_and_save_index(
     chunks: list[tuple[MinimalSource, str]],
     index_dir: str,
 ) -> None:
-    """
-    Construit un index BM25 et le sauvegarde sur disque via l'API native
-    de `bm25s` (`BM25.save`).
-
-    Important : c'est `bm25s` qui pilote le format des fichiers produits
-    (params.index.json, vocab.index.json, corpus.jsonl, ...) — aucun
-    formatage JSON n'est écrit à la main ici. Les `MinimalSource` sont
-    passées en tant que `corpus` ; `bm25s` les sérialise lui-même dans
-    `corpus.jsonl`, une entrée JSON par ligne, dans le même ordre que
-    l'index.
-
-    Args:
-        chunks:    Liste de (MinimalSource, texte).
-        index_dir: Répertoire de sortie (créé si nécessaire).
-    """
     sources: list[MinimalSource] = [src for src, _ in chunks]
     texts: list[str] = [text for _, text in chunks]
 
@@ -468,7 +392,6 @@ def build_and_save_index(
 
     Path(index_dir).mkdir(parents=True, exist_ok=True)
 
-    # corpus= : objets sérialisés tels quels par bm25s dans corpus.jsonl
     corpus_payload = [s.model_dump() for s in sources]
     retriever.save(index_dir, corpus=corpus_payload)
 
@@ -484,15 +407,6 @@ def build_and_save_index(
 def load_index(
     index_dir: str,
 ) -> tuple[bm25s.BM25, list[MinimalSource]]:
-    """
-    Charge un index BM25 préalablement sauvegardé par `bm25s.BM25.save`.
-
-    Args:
-        index_dir: Répertoire contenant les fichiers produits par `.save()`.
-
-    Returns:
-        (retriever_bm25s, liste_de_sources)
-    """
     retriever = bm25s.BM25.load(index_dir, load_corpus=True)
     sources = [MinimalSource(**doc) for doc in retriever.corpus]
     logger.info("Index chargé depuis %s (%d chunks)", index_dir, len(sources))
@@ -500,20 +414,11 @@ def load_index(
 
 
 # ---------------------------------------------------------------------------
-# Interface CLI (Fire)
+# Interface CLI
 # ---------------------------------------------------------------------------
 
 
 class IngestionCLI:
-    """
-    Commandes CLI pour la phase d'ingestion du projet RAG against the machine.
-
-    Exemples :
-        python -m student index --repo_path=./vllm --max_chunk_size=2000
-        python -m student index --repo_path=./vllm --max_chunk_size=2000 \\
-            --overlap=200 --index_dir=data/processed
-    """
-
     def index(
         self,
         repo_path: str,
@@ -521,19 +426,6 @@ class IngestionCLI:
         overlap: int | None = None,
         index_dir: str = DEFAULT_INDEX_DIR,
     ) -> None:
-        """
-        Parcourt le dépôt, parse les fichiers, construit l'index BM25
-        et le sauvegarde via l'API native bm25s.
-
-        Args:
-            repo_path:      Chemin racine du dépôt à indexer (ex: ./vllm).
-            max_chunk_size: Taille maximale d'un chunk en caractères
-                            (défaut: 2000).
-            overlap:        Chevauchement en caractères entre chunks
-                            consécutifs d'un même fichier (défaut: 200).
-            index_dir:      Répertoire de sortie de l'index bm25s
-                            (défaut: data/processed).
-        """
         if overlap is None:
             overlap = max_chunk_size // 10
 
@@ -546,19 +438,8 @@ class IngestionCLI:
             raise ValueError(
                 f"overlap ne peut pas être négatif (valeur reçue : {overlap})."
             )
-        if overlap >= max_chunk_size:
-            logger.warning(
-                "overlap (%d) >= max_chunk_size (%d) — réduit automatiquement "
-                "le pas d'avancement, le chunking peut être inefficace.",
-                overlap, max_chunk_size,
-            )
 
         logger.info("=== Démarrage de l'ingestion ===")
-        logger.info(
-            "repo_path=%s | max_chunk_size=%d | overlap=%d | index_dir=%s",
-            repo_path, max_chunk_size, overlap, index_dir,
-        )
-
         repo_root = Path(repo_path).resolve()
         all_chunks: list[tuple[MinimalSource, str]] = []
         file_count = 0
@@ -599,6 +480,5 @@ class IngestionCLI:
         print(f"   Fichiers traités : {file_count}")
         print(f"   Chunks produits  : {len(all_chunks)}")
         print(f"   Chunks vides     : {chunks_empty}")
-        print(f"   Index BM25       : {index_dir}/ (params.index.json, "
-              f"vocab.index.json, corpus.jsonl, ...)")
+        print(f"   Index BM25       : {index_dir}/")
         print(f"   Durée totale     : {total_elapsed:.2f}s")

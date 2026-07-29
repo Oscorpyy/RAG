@@ -47,18 +47,25 @@ search:
 
 answer:
 	@printf "$(COLOR_CYAN)Starting answering $(COLOR_RESET)\n"
+	@echo "$(COLOR_MAGENTA)Answering Docs json...$(COLOR_RESET)"
 	@uv run python -m src answer_dataset \
 		--student_search_results_path data/output/search_results/dataset_docs_public.json \
+		--save_directory data/output/search_results_and_answer
+	@echo "$(COLOR_MAGENTA)Answering Code json...$(COLOR_RESET)"
+	@uv run python -m src answer_dataset \
+		--student_search_results_path data/output/search_results/dataset_code_public.json \
 		--save_directory data/output/search_results_and_answer
 
 evaluate:
 	@printf "$(COLOR_CYAN)Starting evaluating $(COLOR_RESET)\n"
+	@echo "$(COLOR_MAGENTA)Evaluating Docs json...$(COLOR_RESET)"
 	@uv run python -m src.evaluation evaluate_dataset \
 		--student_search_results_path data/output/search_results/dataset_docs_public.json \
 		--ground_truth_path datasets_public/public/AnsweredQuestions/dataset_docs_public.json \
 		--dataset_type docs \
 		--repo_path . \
 		--output_path data/eval_results_docs.json
+	@echo "$(COLOR_MAGENTA)Evaluating Code json...$(COLOR_RESET)"
 	@uv run python -m src.evaluation evaluate_dataset \
 		--student_search_results_path data/output/search_results/dataset_code_public.json \
 		--ground_truth_path datasets_public/public/AnsweredQuestions/dataset_code_public.json \
