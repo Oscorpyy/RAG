@@ -151,7 +151,7 @@ def build_context_from_question(
     retrieved_sources = retriever.search(question, k=k)
 
     context_blocks: list[str] = []
-    for idx, src in enumerate(retrieved_sources[:MAX_SOURCES_FOR_CONTEXT], 1):
+    for idx, src in enumerate(retrieved_sources[:k], 1):
         try:
             content = extract_segment(
                 file_path=src.file_path,
@@ -315,13 +315,14 @@ async def answer_question_async(
     retrieved_sources: list[MinimalSource],
     repo_path: str,
     semaphore: asyncio.Semaphore,
+    k: int = MAX_SOURCES_FOR_CONTEXT,
 ) -> str:
     """
     Asynchronously answer a single question using retrieved sources.
     Optimized context window & token limits for speed.
     """
     # Optimization: Only keep the Top N best sources for the LLM
-    top_sources = retrieved_sources[:MAX_SOURCES_FOR_CONTEXT]
+    top_sources = retrieved_sources[:k]
 
     context_snippets: list[tuple[int, str, str]] = []
     for idx, src in enumerate(top_sources, 1):
@@ -408,6 +409,7 @@ async def answer_dataset_async(
     repo_path: str = ".",
     concurrency_limit: int = DEFAULT_CONCURRENCY_LIMIT,
     host: Optional[str] = None,
+    k: int = MAX_SOURCES_FOR_CONTEXT,
 ) -> None:
     """
     Core asynchronous logic for processing a dataset of search results.
@@ -437,6 +439,7 @@ async def answer_dataset_async(
                 retrieved_sources=item.retrieved_sources,
                 repo_path=repo_path,
                 semaphore=semaphore,
+                k=k,
             )
         )
         tasks.append(task)
@@ -503,12 +506,14 @@ class GenerationCLI:
         host: Optional[str] = None,
         index_dir: str = str(PROJECT_ROOT / "data" / "processed"),
         repo_path: str = str(PROJECT_ROOT),
+        k: int = MAX_SOURCES_FOR_CONTEXT,
     ) -> None:
         if not context.strip():
             context = build_context_from_question(
                 question=question,
                 index_dir=index_dir,
                 repo_path=repo_path,
+                k=k,
             )
 
         ans = answer(
@@ -524,6 +529,7 @@ class GenerationCLI:
         repo_path: str = ".",
         concurrency_limit: int = DEFAULT_CONCURRENCY_LIMIT,
         host: Optional[str] = None,
+        k: int = MAX_SOURCES_FOR_CONTEXT,
     ) -> None:
         asyncio.run(
             answer_dataset_async(
@@ -533,6 +539,7 @@ class GenerationCLI:
                 repo_path=repo_path,
                 concurrency_limit=concurrency_limit,
                 host=host,
+                k=k,
             )
         )
 
