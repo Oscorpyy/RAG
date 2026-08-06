@@ -23,6 +23,7 @@ from .models import (
     StudentSearchResults,
     StudentSearchResultsAndAnswer,
 )
+from .parsing import parse_student_results
 from .retrieval import Retriever
 
 # ---------------------------------------------------------------------------
@@ -421,10 +422,7 @@ async def answer_dataset_async(
     model_to_use = resolve_model(model, host_url)
     logger.info("Loading search results from %s", student_search_results_path)
 
-    with open(student_search_results_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    search_results_obj = StudentSearchResults.model_validate(data)
+    search_results_obj = parse_student_results(student_search_results_path)
 
     client = ollama.AsyncClient(host=host_url)
     semaphore = asyncio.Semaphore(concurrency_limit)

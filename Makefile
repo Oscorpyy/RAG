@@ -143,6 +143,7 @@ clean:
 	@rm -rf .venv
 	@rm -rf evaluations
 	@rm -rf \~
+	@rm -rf .pytest_cache
 	@rm -rf out.txt
 	@printf "$(COLOR_GREEN)✓ Cleanup completed$(COLOR_RESET)\n"
 

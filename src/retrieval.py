@@ -46,6 +46,7 @@ from .models import (
     StudentSearchResults,
     UnansweredQuestion,
 )
+from .parsing import parse_json_file, parse_questions
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -375,34 +376,7 @@ def load_questions(dataset_path: str) -> list[UnansweredQuestion]:
         raise FileNotFoundError(
             f"Dataset not found: '{path.resolve()}'"
         )
-
-    with open(path, encoding="utf-8") as fh:
-        raw = json.load(fh)
-
-    if isinstance(raw, dict):
-        for key in ("rag_questions", "questions"):
-            if key in raw:
-                raw = raw[key]
-                break
-        else:
-            raise ValueError(
-                f"Unrecognized JSON structure in '{path}'. "
-                "Keys found: " + str(list(raw.keys()))
-            )
-
-    if not isinstance(raw, list):
-        raise ValueError(
-            f"Expected a JSON list in '{path}', "
-            f"got: {type(raw).__name__}"
-        )
-
-    questions: list[UnansweredQuestion] = []
-    for i, item in enumerate(raw):
-        try:
-            questions.append(UnansweredQuestion(**item))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Question skipped at index %d: %s", i, exc)
-
+    questions = parse_questions(path)
     logger.info("%d question(s) loaded from %s", len(questions), path)
     return questions
 
@@ -595,8 +569,7 @@ def chunk_id_for(source: MinimalSource) -> str:
 
 
 def load_eval_set(path: str) -> list[BM25EvalExample]:
-    with open(path, encoding="utf-8") as fh:
-        raw = json.load(fh)
+    raw = parse_json_file(path)
     return [
         BM25EvalExample(
             query=item["query"],

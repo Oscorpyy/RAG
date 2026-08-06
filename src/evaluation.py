@@ -39,6 +39,7 @@ from .models import (
     MinimalSource,
     StudentSearchResults,
 )
+from .parsing import parse_ground_truth, parse_student_results
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -248,15 +249,7 @@ def load_student_results(
         raise FileNotFoundError(
             f"Student results file not found: '{path.resolve()}'"
         )
-
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        return StudentSearchResults(**raw)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in {path}: {e}") from e
-    except Exception as e:
-        raise ValueError(f"Failed to parse {path}: {e}") from e
+    return parse_student_results(path)
 
 
 def load_ground_truth(
@@ -282,42 +275,7 @@ def load_ground_truth(
         raise FileNotFoundError(
             f"Ground truth file not found: '{path.resolve()}'"
         )
-
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in {path}: {e}") from e
-
-    # Normalize to list
-    if isinstance(raw, dict):
-        if "rag_questions" in raw:
-            raw = raw["rag_questions"]
-        elif "questions" in raw:
-            raw = raw["questions"]
-        else:
-            raise ValueError(
-                f"Unrecognized JSON structure in {path}. "
-                f"Expected 'rag_questions' or 'questions' key."
-            )
-
-    if not isinstance(raw, list):
-        raise ValueError(
-            f"Expected list in {path}, got {type(raw).__name__}"
-        )
-
-    result: dict[str, AnsweredQuestion] = {}
-    for item in raw:
-        try:
-            # Try parsing as AnsweredQuestion (has sources/answer)
-            q = AnsweredQuestion(**item)
-            result[q.question_id] = q
-        except Exception as e:
-            logger.warning(
-                "Skipping item (not a valid AnsweredQuestion): %s", e
-            )
-
-    return result
+    return parse_ground_truth(path)
 
 
 # ---------------------------------------------------------------------------
