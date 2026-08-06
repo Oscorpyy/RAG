@@ -1,9 +1,9 @@
 """
 retrieval.py — RAG against the machine
-Recherche BM25 sur l'index produit par la phase d'ingestion.
+BM25 search on the index produced by the ingestion phase.
 
-L'index est chargé via l'API native de bm25s (BM25.load) depuis le
-dossier `data/processed` — aucun pickle, aucun fichier fait main.
+The index is loaded via the native bm25s API (BM25.load) from the
+`data/processed` directory — no pickle, no handcrafted files.
 
 Usage CLI (via Fire) :
     python -m student search_dataset \
@@ -58,7 +58,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constantes
+# Constants
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
@@ -146,8 +146,8 @@ LOCAL_QUERY_EXPANSION_TERMS_EXTENDED: dict[str, tuple[str, ...]] = {
 
 def normalize_file_path(raw_path: str) -> str:
     """
-    Normalise le chemin de fichier pour s'assurer qu'il s'agit d'un
-    chemin relatif propre commençant exactement par data/raw/...
+    Normalize the file path to ensure it is a clean
+    relative path starting exactly with data/raw/...
     """
     path_obj = Path(raw_path)
     try:
@@ -182,7 +182,7 @@ def normalize_file_path(raw_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Chargement de l'index
+# Index Loading
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +190,7 @@ def load_index(
     index_dir: str = DEFAULT_INDEX_DIR,
 ) -> tuple[bm25s.BM25, list[MinimalSource]]:
     """
-    Charge l'index BM25 et les chunks depuis le dossier produit par
+    Load the BM25 index and chunks from the directory produced by
     bm25s.save().
     """
     t0 = time.perf_counter()
@@ -201,8 +201,8 @@ def load_index(
     indexed_k1, indexed_b = retriever.k1, retriever.b
     if (indexed_k1, indexed_b) != (BM25_K1, BM25_B):
         logger.warning(
-            "Index sur disque construit avec k1=%.2f b=%.2f, mais "
-            "ingestion.py définit actuellement BM25_K1=%.2f BM25_B=%.2f.",
+            "On-disk index built with k1=%.2f b=%.2f, but "
+            "ingestion.py currently defines BM25_K1=%.2f BM25_B=%.2f.",
             indexed_k1, indexed_b, BM25_K1, BM25_B,
         )
 
@@ -219,7 +219,7 @@ def load_index(
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "Index chargé en %.2fs — %d chunks, %d termes dans le vocab",
+        "Index loaded in %.2fs — %d chunks, %d terms in vocab",
         elapsed,
         len(sources),
         len(retriever.vocab_dict),
@@ -228,7 +228,7 @@ def load_index(
 
 
 # ---------------------------------------------------------------------------
-# Query Expansion via Ollama / Locale
+# Query Expansion via Ollama / Local
 # ---------------------------------------------------------------------------
 
 
@@ -288,7 +288,7 @@ def expand_query(
 
 
 # ---------------------------------------------------------------------------
-# Recherche unitaire et déduplication
+# Single Search and Deduplication
 # ---------------------------------------------------------------------------
 
 
@@ -314,10 +314,10 @@ def search(
     corpus_documents: list[dict[str, Any]] | None = None,
     dataset_type: str | None = None,
 ) -> list[MinimalSource]:
-    """Recherche BM25 avec expansion de requête et réordonnancement ciblé."""
+    """BM25 search with query expansion and targeted reranking."""
     query = query.strip()
     if not query:
-        logger.warning("Requête vide — aucun résultat.")
+        logger.warning("Empty query — no results.")
         return []
 
     if use_expansion:
@@ -343,7 +343,7 @@ def search(
     top_docs: list[dict[str, Any]] = results[0].tolist()
     candidates = [MinimalSource(**doc) for doc in top_docs]
 
-    # Réordonnancement selon le type de dataset (docs vs code)
+    # Reranking based on dataset type (docs vs code)
     doc_exts = (".md", ".mdx", ".rst")
     if dataset_type == "docs":
         ranked = [
@@ -365,7 +365,7 @@ def search(
 
 
 # ---------------------------------------------------------------------------
-# Chargement des questions
+# Question Loading
 # ---------------------------------------------------------------------------
 
 
@@ -373,7 +373,7 @@ def load_questions(dataset_path: str) -> list[UnansweredQuestion]:
     path = Path(dataset_path)
     if not path.exists():
         raise FileNotFoundError(
-            f"Dataset introuvable : '{path.resolve()}'"
+            f"Dataset not found: '{path.resolve()}'"
         )
 
     with open(path, encoding="utf-8") as fh:
@@ -386,14 +386,14 @@ def load_questions(dataset_path: str) -> list[UnansweredQuestion]:
                 break
         else:
             raise ValueError(
-                f"Structure JSON non reconnue dans '{path}'. "
-                "Clés trouvées : " + str(list(raw.keys()))
+                f"Unrecognized JSON structure in '{path}'. "
+                "Keys found: " + str(list(raw.keys()))
             )
 
     if not isinstance(raw, list):
         raise ValueError(
-            f"Attendu une liste JSON dans '{path}', "
-            f"obtenu : {type(raw).__name__}"
+            f"Expected a JSON list in '{path}', "
+            f"got: {type(raw).__name__}"
         )
 
     questions: list[UnansweredQuestion] = []
@@ -401,14 +401,14 @@ def load_questions(dataset_path: str) -> list[UnansweredQuestion]:
         try:
             questions.append(UnansweredQuestion(**item))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Question ignorée à l'index %d : %s", i, exc)
+            logger.warning("Question skipped at index %d: %s", i, exc)
 
-    logger.info("%d question(s) chargée(s) depuis %s", len(questions), path)
+    logger.info("%d question(s) loaded from %s", len(questions), path)
     return questions
 
 
 # ---------------------------------------------------------------------------
-# Sauvegarde des résultats
+# Saving Results
 # ---------------------------------------------------------------------------
 
 
@@ -450,7 +450,7 @@ def _search_dataset_to_path(
 ) -> None:
     questions = load_questions(dataset_path)
     if not questions:
-        logger.error("Aucune question chargée depuis %s", dataset_path)
+        logger.error("No questions loaded from %s", dataset_path)
         return
 
     results = run_search_dataset(
@@ -460,7 +460,7 @@ def _search_dataset_to_path(
 
 
 # ---------------------------------------------------------------------------
-# Recherche batch
+# Batch Search
 # ---------------------------------------------------------------------------
 
 
@@ -493,7 +493,7 @@ def run_search_dataset(
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Échec pour question_id=%s : %s",
+                "Failed for question_id=%s: %s",
                 question.question_id,
                 exc,
             )
@@ -511,7 +511,7 @@ def run_search_dataset(
             tqdm(
                 executor.map(_search_one, questions),
                 total=len(questions),
-                desc="Recherche",
+                desc="Searching",
                 unit="q",
             )
         )
@@ -520,7 +520,7 @@ def run_search_dataset(
 
 
 # ---------------------------------------------------------------------------
-# Classe Retriever
+# Retriever Class
 # ---------------------------------------------------------------------------
 
 
@@ -577,7 +577,7 @@ class Retriever:
 
 
 # ---------------------------------------------------------------------------
-# Grid search k1/b sur un jeu d'évaluation étiqueté
+# Grid search k1/b on a labeled evaluation set
 # ---------------------------------------------------------------------------
 
 
@@ -636,7 +636,7 @@ def grid_search_k1_b(
     use_stemmer: bool = True,
 ) -> list[dict[str, Any]]:
     logger.info(
-        "Reconstruction du texte des %d chunks depuis le disque…",
+        "Reconstructing text of %d chunks from disk…",
         len(sources),
     )
     texts: list[str] = []
@@ -650,14 +650,14 @@ def grid_search_k1_b(
     skipped = len(sources) - len(valid_sources)
     if skipped:
         logger.warning(
-            "%d chunk(s) ignoré(s) — fichier source introuvable depuis "
-            "%s (chemins relatifs à PROJECT_ROOT).",
+            "%d chunk(s) skipped — source file not found from "
+            "%s (paths relative to PROJECT_ROOT).",
             skipped, PROJECT_ROOT,
         )
     if not texts:
         raise RuntimeError(
-            "Aucun texte de chunk n'a pu être reconstruit — vérifie "
-            f"que les fichiers sources sont accessibles depuis "
+            "No chunk text could be reconstructed — check "
+            f"that source files are accessible from "
             f"{PROJECT_ROOT} (data/raw/...)."
         )
 
@@ -669,8 +669,8 @@ def grid_search_k1_b(
             stemmer = _Stemmer.Stemmer("english")
         except ImportError:
             logger.warning(
-                "PyStemmer non installé — grid search sans stemming "
-                "(pip install PyStemmer pour l'activer)."
+                "PyStemmer not installed — grid search without stemming "
+                "(pip install PyStemmer to enable it)."
             )
 
     corpus_tokens = bm25s.tokenize(texts, stopwords="en", stemmer=stemmer)
@@ -681,7 +681,7 @@ def grid_search_k1_b(
 
     k_eff = min(k, len(valid_sources))
     if k_eff == 0:
-        raise RuntimeError("Corpus vide après reconstruction du texte.")
+        raise RuntimeError("Empty corpus after text reconstruction.")
 
     results: list[dict[str, Any]] = []
     for k1 in k1_values:
@@ -733,7 +733,7 @@ class RetrievalCLI:
     ) -> None:
         retriever = Retriever.from_disk(index_dir)
         logger.info(
-            "Index prêt — %d chunks, %d termes",
+            "Index ready — %d chunks, %d terms",
             retriever.corpus_size,
             retriever.vocab_size,
         )
@@ -742,11 +742,11 @@ class RetrievalCLI:
         results = retriever.search(query, k)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
-        print(f"\n🔍 Requête : {query!r}")
-        print(f"   Top-{k} résultats  ({elapsed_ms:.1f} ms)\n")
+        print(f"\n🔍 Query: {query!r}")
+        print(f"   Top-{k} results  ({elapsed_ms:.1f} ms)\n")
 
         if not results:
-            print("   (aucun résultat)")
+            print("   (no results)")
             return
 
         for rank, src in enumerate(results, start=1):
@@ -768,7 +768,7 @@ class RetrievalCLI:
         questions = load_questions(dataset_path)
 
         if not questions:
-            logger.error("Aucune question chargée — abandon.")
+            logger.error("No questions loaded — aborting.")
             return
 
         results = retriever.search_dataset(
@@ -781,12 +781,12 @@ class RetrievalCLI:
 
         print(f"Saved student_search_results to {save_directory}")
 
-        print("\n✅ Recherche batch terminée")
-        print(f"   Questions traitées   : {len(questions)}")
-        print(f"   k (résultats/question): {k}")
-        print(f"   Fichier de sortie    : {save_directory}")
-        print(f"   Durée totale         : {total:.2f}s")
-        print(f"   Moyenne / question   : {per_q_ms:.1f} ms")
+        print("\n✅ Batch search complete")
+        print(f"   Questions processed  : {len(questions)}")
+        print(f"   k (results/question) : {k}")
+        print(f"   Output file          : {save_directory}")
+        print(f"   Total duration       : {total:.2f}s")
+        print(f"   Average / question   : {per_q_ms:.1f} ms")
 
     def search_datasets(
         self,
@@ -805,7 +805,7 @@ class RetrievalCLI:
         docs_output_path = output_root / "dataset_docs_public.json"
         code_output_path = output_root / "dataset_code_public.json"
 
-        print("\n🔎 Génération des résultats docs et code…")
+        print("\n🔎 Generating docs and code results…")
         _search_dataset_to_path(
             docs_dataset_path,
             str(docs_output_path),
@@ -822,10 +822,10 @@ class RetrievalCLI:
         )
 
         elapsed = time.perf_counter() - t_start
-        print("\n✅ Résultats générés")
+        print("\n✅ Results generated")
         print(f"   Docs : {docs_output_path}")
         print(f"   Code : {code_output_path}")
-        print(f"   Durée totale : {elapsed:.2f}s")
+        print(f"   Total duration : {elapsed:.2f}s")
 
     def tune_bm25(
         self,
@@ -842,8 +842,8 @@ class RetrievalCLI:
         b_list = tuple(float(x) for x in b_values.split(","))
 
         print(
-            f"\n🔬 Grid search k1/b — {len(eval_set)} requêtes "
-            f"étiquetées, {len(k1_list)}×{len(b_list)} combinaisons\n"
+            f"\n🔬 Grid search k1/b — {len(eval_set)} labeled queries "
+            f"{len(k1_list)}×{len(b_list)} combinations\n"
         )
 
         results = grid_search_k1_b(
@@ -851,18 +851,18 @@ class RetrievalCLI:
             k=k, method=method,
         )
 
-        print(f"📊 Top combinaisons (recall@{k}) :\n")
+        print(f"📊 Top combinations (recall@{k}):\n")
         for row in results[:5]:
             print(
                 f"   k1={row['k1']:.2f}  b={row['b']:.2f}  "
                 f"recall@{k}={row[f'recall@{k}']:.4f}  "
-                f"({row['n_queries']} requêtes évaluées)"
+                f"({row['n_queries']} queries evaluated)"
             )
 
 
 @lru_cache(maxsize=1024)
 def _expand_query_locally_cached(query: str) -> str:
-    """Expansion locale ultra-rapide sans appel réseau."""
+    """Ultra-fast local expansion without network calls."""
     tokenized_query = tokenize_query(query)
     if not tokenized_query:
         return query
@@ -873,7 +873,7 @@ def _expand_query_locally_cached(query: str) -> str:
     if not query_tokens:
         return query
 
-    # OPTIMISATION : On force les termes étendus pour ratisser plus large !
+    # OPTIMIZATION: Force extended terms to cast a wider net!
     active_terms = {
         **LOCAL_QUERY_EXPANSION_TERMS,
         **LOCAL_QUERY_EXPANSION_TERMS_EXTENDED,

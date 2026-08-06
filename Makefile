@@ -54,7 +54,7 @@ run:
 	printf "$(COLOR_YELLOW)⏱  Execution time: %02d:%02d$(COLOR_RESET)\n" \
 		$$((elapsed / 60)) $$((elapsed % 60))
 
-run_all: ollama-start ollama-pull
+run_all: server
 	@printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"
 	@printf "$(COLOR_MAGENTA)Starting complete pipeline$(COLOR_RESET)\n"
 	@printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"
@@ -165,5 +165,7 @@ exam :
 	@printf "$(COLOR_CYAN)Running exam...$(COLOR_RESET)\n"
 	@./exams/scripts/exam_retrieval.sh  --student-path . --moulinette-path ./moulinette/moulinette
 
-.PHONY: all install run debug clean re lint  index search answer evaluate ollama-start ollama-pull server exam
+.PHONY: all install run debug clean re lint index search answer evaluate ollama-start ollama-pull server exam
+
+
 

@@ -1,7 +1,7 @@
 """
 ingestion.py — RAG against the machine
-Phase d'ingestion : parsing, chunking et indexation BM25 de fichiers
-Python/Markdown.
+Ingestion phase: parsing, chunking, and BM25 indexing of
+Python/Markdown files.
 
 Usage CLI (via Fire) :
     python -m student index --max_chunk_size=2000
@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constantes
+# Constants
 # ---------------------------------------------------------------------------
 
 DEFAULT_MAX_CHUNK_SIZE: int = 2000
@@ -63,10 +63,10 @@ def make_minimal_source(
     total_file_length: int,
 ) -> MinimalSource:
     """
-    Crée une instance de MinimalSource en garantissant que
-    last_character_index est calculé strictement comme
-    start_index + len(chunk_content) et ne dépasse jamais la longueur
-    totale du fichier.
+    Create a MinimalSource instance ensuring that
+    last_character_index is strictly calculated as
+    start_index + len(chunk_content) and never exceeds the total
+    file length.
     """
     last_idx = min(start_index + len(chunk_content), total_file_length)
     return MinimalSource(
@@ -90,8 +90,8 @@ def _split_if_oversized(
     total_file_length: int = 0,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Si le texte dépasse max_chunk_size, le découpe en tranches qui se
-    chevauchent de `overlap` caractères. Sinon, l'émet tel quel.
+    If the text exceeds max_chunk_size, split it into slices that
+    overlap by `overlap` characters. Otherwise, emit it as-is.
     """
     if total_file_length <= 0:
         total_file_length = start + len(text)
@@ -125,8 +125,8 @@ def _accumulate_with_overlap(
     overlap: int,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Accumule des blocs en chunks avec chevauchement contrôlé entre
-    chunks consécutifs.
+    Accumulate blocks into chunks with controlled overlap between
+    consecutive chunks.
     """
     if not blocks:
         return
@@ -170,8 +170,8 @@ def _iter_markdown_chunks(
     overlap: int,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Découpe un fichier Markdown en chunks respectant 100% du contenu du fichier
-    (y compris lignes vides et espaces) sans aucun trou d'index.
+    Split a Markdown file into chunks preserving 100% of the file content
+    (including blank lines and spaces) without any index gaps.
     """
     file_len = len(content)
     if file_len <= max_chunk_size:
@@ -210,9 +210,9 @@ def _iter_python_chunks(
     overlap: int,
 ) -> Iterator[tuple[MinimalSource, str]]:
     """
-    Découpe un fichier Python en chunks en s'appuyant sur l'AST top-level,
-    tout en étendant les blocs pour couvrir 100% des caractères du fichier
-    (commentaires, docstrings, lignes vides entre fonctions).
+    Split a Python file into chunks using the top-level AST,
+    while extending blocks to cover 100% of the file characters
+    (comments, docstrings, blank lines between functions).
     """
     file_len = len(content)
     if file_len <= max_chunk_size:
@@ -245,8 +245,8 @@ def _iter_python_chunks(
         if start_line is None or end_line is None:
             return None
 
-        # Inclure les lignes des décorateurs pour conserver le contexte
-        # des fonctions/classes
+        # Include decorator lines to preserve the context
+        # of functions/classes
         if hasattr(node, "decorator_list") and getattr(node, "decorator_list"):
             dec_lines = [
                 d.lineno
@@ -303,22 +303,22 @@ def _iter_python_chunks(
 
 
 # ---------------------------------------------------------------------------
-# Collecte de fichiers
+# File Collection
 # ---------------------------------------------------------------------------
 
 
 def collect_files(repo_path: str) -> Generator[Path, None, None]:
     """
-    Parcourt récursivement repo_path et retourne les fichiers .py et .md.
+    Recursively walk repo_path and return .py and .md files.
     """
     root = Path(repo_path)
     if not root.exists():
         raise FileNotFoundError(
-            f"Le chemin '{root.resolve()}' n'existe pas."
+            f"The path '{root.resolve()}' does not exist."
         )
     if not root.is_dir():
         raise NotADirectoryError(
-            f"Le chemin '{root.resolve()}' existe mais n'est pas un répertoire"
+            f"The path '{root.resolve()}' exists but is not a directory"
         )
 
     for dirpath, dirnames, filenames in os.walk(root):
@@ -334,7 +334,7 @@ def collect_files(repo_path: str) -> Generator[Path, None, None]:
 
 
 # ---------------------------------------------------------------------------
-# Parsing & chunking principal
+# Main Parsing & Chunking
 # ---------------------------------------------------------------------------
 
 
@@ -345,7 +345,7 @@ def parse_file(
     overlap: int = DEFAULT_OVERLAP,
 ) -> list[tuple[MinimalSource, str]]:
     """
-    Lit un fichier et retourne la liste de ses chunks avec métadonnées.
+    Read a file and return the list of its chunks with metadata.
     """
     relative_path = filepath.relative_to(repo_root).as_posix()
 
@@ -353,7 +353,7 @@ def parse_file(
         content = fh.read()
 
     if not content.strip():
-        logger.debug("Fichier vide ignoré : %s", relative_path)
+        logger.debug("Empty file skipped: %s", relative_path)
         return []
 
     if filepath.suffix == ".py":
@@ -372,7 +372,7 @@ def parse_file(
 
 
 # ---------------------------------------------------------------------------
-# Tokeniseur
+# Tokenizer
 # ---------------------------------------------------------------------------
 
 STOP_PATH_WORDS: set[str] = {
@@ -383,9 +383,9 @@ STOP_PATH_WORDS: set[str] = {
 
 def preprocess_text_for_bm25(text: str, file_path: str = "") -> str:
     """
-    Pré-traite le texte et le chemin de fichier pour BM25 en étendant
-    les identifiants (snake_case, camelCase, mots avec tirets) et en
-    intégrant les mots clés du chemin.
+    Pre-process text and file path for BM25 by expanding
+    identifiers (snake_case, camelCase, hyphenated words) and
+    incorporating path keywords.
     """
     def expand_identifier(match: re.Match[str]) -> str:
         val = match.group(0)
@@ -406,7 +406,7 @@ def preprocess_text_for_bm25(text: str, file_path: str = "") -> str:
             exp_path = re.sub(
                 r"\b[a-zA-Z0-9_-]{3,}\b", expand_identifier, path_str
             )
-            # Ponderer les termes du chemin en les répétant 3 fois
+            # Weight path terms by repeating them 3 times
             return f"{exp_path} {exp_path} {exp_path}\n{exp_text}"
 
     return exp_text
@@ -440,7 +440,7 @@ def tokenize_query(query: str | list[str]) -> list[list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Indexation BM25
+# BM25 Indexing
 # ---------------------------------------------------------------------------
 
 
@@ -454,7 +454,7 @@ def build_and_save_index(
         for src, text in chunks
     ]
 
-    logger.info("Tokenisation de %d chunks pour BM25…", len(texts))
+    logger.info("Tokenizing %d chunks for BM25…", len(texts))
     t0 = time.perf_counter()
 
     stemmer = Stemmer.Stemmer("english")
@@ -472,7 +472,7 @@ def build_and_save_index(
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "Index BM25 construit et sauvegardé en %.2fs → %s (%d documents)",
+        "BM25 index built and saved in %.2fs → %s (%d documents)",
         elapsed,
         index_dir,
         len(texts),
@@ -484,12 +484,12 @@ def load_index(
 ) -> tuple[bm25s.BM25, list[MinimalSource]]:
     retriever = bm25s.BM25.load(index_dir, load_corpus=True)
     sources = [MinimalSource(**doc) for doc in retriever.corpus]
-    logger.info("Index chargé depuis %s (%d chunks)", index_dir, len(sources))
+    logger.info("Index loaded from %s (%d chunks)", index_dir, len(sources))
     return retriever, sources
 
 
 # ---------------------------------------------------------------------------
-# Interface CLI
+# CLI Interface
 # ---------------------------------------------------------------------------
 
 
@@ -501,22 +501,22 @@ class IngestionCLI:
         overlap: int | None = None,
         index_dir: str = DEFAULT_INDEX_DIR,
     ) -> None:
-        # OPTIMISATION : On fixe l'overlap par défaut à 25% du chunk size.
-        # Cela garantit un très grand chevauchement.
+        # OPTIMIZATION: Default overlap set to 25% of chunk size.
+        # This ensures a very large overlap.
         if overlap is None:
             overlap = max_chunk_size // 4
 
         if max_chunk_size < 10:
             raise ValueError(
-                f"max_chunk_size ne peut pas être inférieur à 10 "
-                f"(valeur reçue : {max_chunk_size})."
+                f"max_chunk_size cannot be less than 10 "
+                f"(received value: {max_chunk_size})."
             )
         if overlap < 0:
             raise ValueError(
-                f"overlap ne peut pas être négatif (valeur reçue : {overlap})."
+                f"overlap cannot be negative (received value: {overlap})."
             )
 
-        logger.info("=== Démarrage de l'ingestion ===")
+        logger.info("=== Starting ingestion ===")
         repo_root = Path(repo_path).resolve()
         all_chunks: list[tuple[MinimalSource, str]] = []
         file_count = 0
@@ -534,28 +534,28 @@ class IngestionCLI:
                     chunks_empty += 1
                 file_count += 1
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Erreur lors du parsing de %s : %s",
+                logger.warning("Error while parsing %s: %s",
                                filepath, exc)
 
         logger.info(
-            "Parsing terminé : %d fichiers, %d chunks (%.2fs)",
+            "Parsing complete: %d files, %d chunks (%.2fs)",
             file_count,
             len(all_chunks),
             time.perf_counter() - t_start,
         )
 
         if not all_chunks:
-            logger.error("Aucun chunk produit. Vérifiez le chemin du dépôt.")
+            logger.error("No chunks produced. Check the repository path.")
             return
 
         build_and_save_index(all_chunks, index_dir)
 
         total_elapsed = time.perf_counter() - t_start
-        logger.info("=== Ingestion complète en %.2fs ===", total_elapsed)
+        logger.info("=== Ingestion complete in %.2fs ===", total_elapsed)
 
-        print("\n✅ Ingestion terminée")
-        print(f"   Fichiers traités : {file_count}")
-        print(f"   Chunks produits  : {len(all_chunks)}")
-        print(f"   Chunks vides     : {chunks_empty}")
-        print(f"   Index BM25       : {index_dir}/")
-        print(f"   Durée totale     : {total_elapsed:.2f}s")
+        print("\n✅ Ingestion complete")
+        print(f"   Files processed  : {file_count}")
+        print(f"   Chunks produced  : {len(all_chunks)}")
+        print(f"   Empty chunks     : {chunks_empty}")
+        print(f"   BM25 index       : {index_dir}/")
+        print(f"   Total duration   : {total_elapsed:.2f}s")
