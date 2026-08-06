@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import subprocess
 import time
 from pathlib import Path
 from typing import Optional
@@ -24,6 +23,7 @@ from .models import (
     StudentSearchResults,
     StudentSearchResultsAndAnswer,
 )
+from .retrieval import Retriever
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -39,20 +39,35 @@ logger = logging.getLogger(__name__)
 # Constantes et Prompts
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL: str = "qwen:0.3b"
+DEFAULT_MODEL: str = "qwen3:0.6b"
 DEFAULT_CONCURRENCY_LIMIT: int = 1
 DEFAULT_OLLAMA_HOST: str = "http://localhost:11434"
+PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 MAX_SOURCES_FOR_CONTEXT: int = 3
 MAX_CHARS_PER_SOURCE: int = 800
 DATASET_NUM_CTX: int = 2048
 
 SYSTEM_PROMPT = (
-    "Answer the question using ONLY the given context — no outside "
-    "knowledge, no guessing. Cite sources like [Source 1], [Source 2]. "
-    "Be direct and self-contained. If the context is insufficient, say: "
-    "'The provided context does not contain sufficient information to "
-    "answer the question.' "
-    "Do NOT output <think> tags or reasoning — final answer only."
+    "You are a precise technical assistant for the vLLM codebase.\n"
+    "\n"
+    "## STRICT RULES\n"
+    "1. Use ONLY the provided [Source N] context to answer. "
+    "NEVER use outside knowledge, prior training data, or assumptions.\n"
+    "2. CITE every claim with the exact tag [Source N] inline "
+    "(e.g. 'The scheduler uses async iteration [Source 2].'). "
+    "A sentence without a citation is FORBIDDEN.\n"
+    "3. When MULTIPLE sources support a statement, cite ALL of them "
+    "(e.g. [Source 1][Source 3]).\n"
+    "4. QUOTE short relevant identifiers or phrases from the source "
+    "when they strengthen the answer (e.g. function names, class names, "
+    "config keys).\n"
+    "5. If the context does NOT contain enough information, respond "
+    "EXACTLY with: 'The provided context does not contain sufficient "
+    "information to answer the question.' — nothing else.\n"
+    "6. Do NOT speculate, do NOT add information not in the sources, "
+    "do NOT say 'based on my knowledge'.\n"
+    "7. Be concise and direct. Do NOT output <think> tags, reasoning "
+    "traces, or preamble — final answer only.\n"
 )
 
 
@@ -82,6 +97,91 @@ def truncate_content(text: str, max_chars: int = MAX_CHARS_PER_SOURCE) -> str:
     return text[:max_chars].rstrip() + "..."
 
 
+def _detect_file_type(file_path: str) -> str:
+    """
+    Retourne un label lisible ("Python Code" / "Markdown Documentation")
+    à partir de l'extension du fichier.
+    """
+    if file_path.endswith(".py"):
+        return "Python Code"
+    if file_path.endswith((".md", ".mdx", ".rst")):
+        return "Markdown Documentation"
+    return "Text"
+
+
+def format_source_block(
+    idx: int,
+    file_path: str,
+    content: str,
+) -> str:
+    """
+    Formate un snippet de source avec une structure claire pour le LLM :
+    - Tag [Source N] bien visible
+    - Type de fichier (code vs doc)
+    - Contenu dans un bloc fenced approprié
+    """
+    file_type = _detect_file_type(file_path)
+    # Pour le code Python, on utilise un bloc ``` pour que le LLM
+    # distingue clairement le code du texte naturel.
+    if file_type == "Python Code":
+        formatted_content = f"```python\n{content}\n```"
+    else:
+        formatted_content = content
+
+    return (
+        f"--- [Source {idx}] ---\n"
+        f"File: {file_path}\n"
+        f"Type: {file_type}\n"
+        f"{formatted_content}\n"
+        f"--- end [Source {idx}] ---\n"
+    )
+
+
+def build_context_from_question(
+    question: str,
+    index_dir: str = str(PROJECT_ROOT / "data" / "processed"),
+    repo_path: str = str(PROJECT_ROOT),
+    k: int = MAX_SOURCES_FOR_CONTEXT,
+) -> str:
+    """
+    Retrieve and format source snippets for a single question.
+    """
+    retriever = Retriever.from_disk(index_dir)
+    retrieved_sources = retriever.search(question, k=k)
+
+    context_blocks: list[str] = []
+    for idx, src in enumerate(retrieved_sources[:MAX_SOURCES_FOR_CONTEXT], 1):
+        try:
+            content = extract_segment(
+                file_path=src.file_path,
+                start_idx=src.first_character_index,
+                end_idx=src.last_character_index,
+                repo_path=repo_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Skipping source %d ('%s') for question '%s': %s",
+                idx,
+                src.file_path,
+                question,
+                exc,
+            )
+            continue
+
+        if not content:
+            continue
+
+        context_blocks.append(
+            format_source_block(
+                idx,
+                src.file_path,
+                truncate_content(content.strip()),
+            )
+        )
+
+    return "\n".join(context_blocks)
+
+
 # ---------------------------------------------------------------------------
 # Ollama Health Check & Model Resolver
 # ---------------------------------------------------------------------------
@@ -97,35 +197,9 @@ def is_ollama_running(host: str = DEFAULT_OLLAMA_HOST) -> bool:
         client.list()
         return True
     except Exception:
-        logger.info(
-            "Ollama not reachable at %s — attempting to launch "
-            "'ollama serve'...",
-            host_url,
-        )
-        try:
-            subprocess.Popen(
-                ["ollama", "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not launch 'ollama serve': %s",
-                exc,
-            )
-            return False
-
-        for _ in range(10):
-            time.sleep(0.5)
-            try:
-                client = ollama.Client(host=host_url)
-                client.list()
-                return True
-            except Exception:
-                continue
-
-        logger.warning(
-            "Ollama service check failed on %s after attempting to start it.",
+        logger.error(
+            "Ollama service is not reachable at %s. "
+            "Please ensure Ollama is running (e.g., via 'make ollama-start').",
             host_url,
         )
         return False
@@ -178,27 +252,58 @@ def answer(
         logger.error(error_msg)
         return error_msg
 
+    if not context.strip():
+        return (
+            "The provided context does not contain sufficient "
+            "information to answer the question."
+        )
+
     client = ollama.Client(host=host_url)
     model_to_use = resolve_model(model, host_url)
 
-    prompt = f"Context:\n[Source 1]\n{context}\n\nQuestion: {question}\nAnswer:"
+    stripped_context = context.strip()
+    if stripped_context.startswith("--- [Source "):
+        source_block = stripped_context
+        source_count = max(
+            1, source_block.count("--- [Source ")
+        )
+    else:
+        source_block = format_source_block(1, "provided_context", context)
+        source_count = 1
+
+    source_tags = ", ".join(
+        f"[Source {idx}]" for idx in range(1, source_count + 1)
+    )
+    prompt = (
+        f"Context:\n{source_block}\n"
+        f"Question: {question}\n"
+        f"Answer (cite {source_tags} for every claim):"
+    )
 
     try:
         response = client.generate(
             model=model_to_use,
             system=SYSTEM_PROMPT,
             prompt=prompt,
+            think=False,
             options={
                 "temperature": 0.0,
-                "num_predict": 128,
+                "num_predict": 256,
                 "num_ctx": 4096,
                 "stop": ["</think>"],
             },
         )
-        raw_ans = str(response["response"])
+        raw_ans = str(response["response"]).strip()
+        if not raw_ans:
+            logger.warning(
+                "LLM returned empty response for question: %s", question
+            )
+            return "No answer could be generated from the LLM."
         return clean_llm_response(raw_ans)
     except Exception as e:
-        logger.error("Error generating answer for question '%s': %s", question, e)
+        logger.error(
+            "Error generating answer for question '%s': %s", question, e
+        )
         return "Error: Failed to generate answer."
 
 
@@ -247,16 +352,28 @@ async def answer_question_async(
             "to answer the question."
         )
 
-    context_str = ""
+    # Build structured context — each source is clearly delimited with
+    # its file type so the LLM can distinguish code from documentation.
+    context_blocks = []
     for idx, file_path, content in context_snippets:
-        context_str += f"[Source {idx}] (File: {file_path}):\n{content}\n\n"
+        context_blocks.append(format_source_block(idx, file_path, content))
+    context_str = "\n".join(context_blocks)
+
+    # Build available source tags for the citation reminder
+    source_tags = ", ".join(
+        f"[Source {idx}]" for idx, _, _ in context_snippets
+    )
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": f"Context:\n{context_str}Question: {question}"
-        }
+            "content": (
+                f"Context:\n{context_str}\n"
+                f"Question: {question}\n"
+                f"Answer (cite {source_tags} for every claim):"
+            ),
+        },
     ]
 
     async with semaphore:
@@ -264,6 +381,7 @@ async def answer_question_async(
             response = await client.chat(
                 model=model,
                 messages=messages,
+                think=False,
                 options={
                     "temperature": 0.0,
                     "num_predict": 1024,  # Augmenté massivement
@@ -385,8 +503,19 @@ class GenerationCLI:
         context: str = "",
         model: str = DEFAULT_MODEL,
         host: Optional[str] = None,
+        index_dir: str = str(PROJECT_ROOT / "data" / "processed"),
+        repo_path: str = str(PROJECT_ROOT),
     ) -> None:
-        ans = answer(question=question, context=context, model=model, host=host)
+        if not context.strip():
+            context = build_context_from_question(
+                question=question,
+                index_dir=index_dir,
+                repo_path=repo_path,
+            )
+
+        ans = answer(
+            question=question, context=context, model=model, host=host
+        )
         print(ans)
 
     def answer_dataset(

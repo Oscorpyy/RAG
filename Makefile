@@ -13,7 +13,48 @@ install:
 	@uv sync
 	@printf "$(COLOR_GREEN)Installation completed$(COLOR_RESET)\n"
 
+ollama-pull:
+	@printf "$(COLOR_CYAN)Checking/Downloading model qwen3:0.6b...$(COLOR_RESET)\n"
+	@OLLAMA_MODELS=~/ollama_models ollama pull qwen3:0.6b
+	@printf "$(COLOR_GREEN)✓ Model ready$(COLOR_RESET)\n"
+
+ollama-start:
+	@mkdir -p ~/ollama_models
+	@printf "$(COLOR_CYAN)Starting Ollama server...$(COLOR_RESET)\n"
+	@nohup env OLLAMA_MODELS=~/ollama_models ollama serve > /tmp/ollama.log 2>&1 < /dev/null &
+	@printf "$(COLOR_CYAN)Waiting for Ollama to be ready...$(COLOR_RESET)\n"
+	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do \
+		if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then \
+			printf "$(COLOR_GREEN)✓ Ollama is ready!$(COLOR_RESET)\n"; \
+			exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	printf "$(COLOR_RED)✗ Ollama did not become ready. Check /tmp/ollama.log$(COLOR_RESET)\n"; \
+	exit 1
+
+server: ollama-start ollama-pull
+	@printf "$(COLOR_CYAN)Starting Ollama server...$(COLOR_RESET)\n"
+
+
 run:
+	@start=$$(date +%s); \
+	printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"; \
+	printf "$(COLOR_MAGENTA)Starting complete pipeline$(COLOR_RESET)\n"; \
+	printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"; \
+	printf "\n$(COLOR_CYAN)▶ Launching indexing...$(COLOR_RESET)\n"; \
+	$(MAKE) index; \
+	printf "\n$(COLOR_CYAN)▶ Launching search...$(COLOR_RESET)\n"; \
+	$(MAKE) search; \
+	printf "\n$(COLOR_CYAN)▶ Launching evaluation...$(COLOR_RESET)\n"; \
+	$(MAKE) evaluate; \
+	end=$$(date +%s); \
+	elapsed=$$((end - start)); \
+	printf "\n$(COLOR_GREEN)✓ Complete pipeline finished successfully.$(COLOR_RESET)\n"; \
+	printf "$(COLOR_YELLOW)⏱  Execution time: %02d:%02d$(COLOR_RESET)\n" \
+		$$((elapsed / 60)) $$((elapsed % 60))
+
+run_all: ollama-start ollama-pull
 	@printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"
 	@printf "$(COLOR_MAGENTA)Starting complete pipeline$(COLOR_RESET)\n"
 	@printf "$(COLOR_MAGENTA)========================================$(COLOR_RESET)\n"
@@ -34,16 +75,22 @@ run:
 
 index:
 	@printf "$(COLOR_CYAN)Starting indexing $(COLOR_RESET)\n"
-	@uv run python -m src index --repo_path=./data/raw/vllm-0.10.1/vllm --max_chunk_size=2000
+	@uv run python -m src index --max_chunk_size=2000
 
 search:
 	@printf "$(COLOR_CYAN)Starting searching $(COLOR_RESET)\n"
-	@uv run python -m src search_datasets \
+	@echo "$(COLOR_MAGENTA)Searching Docs dataset...$(COLOR_RESET)"
+	@uv run python -m src search_dataset \
+		--dataset_path datasets_public/public/UnansweredQuestions/dataset_docs_public.json \
+		--save_directory data/output/search_results/UnansweredQuestions/dataset_docs_public.json \
 		--k 10 \
-		--index_dir data/processed \
-		--output_dir data/output/search_results \
-		--docs_dataset_path datasets_public/public/UnansweredQuestions/dataset_docs_public.json \
-		--code_dataset_path datasets_public/public/UnansweredQuestions/dataset_code_public.json
+		--index_dir data/processed
+	@echo "$(COLOR_MAGENTA)Searching Code dataset...$(COLOR_RESET)"
+	@uv run python -m src search_dataset \
+		--dataset_path datasets_public/public/UnansweredQuestions/dataset_code_public.json \
+		--save_directory data/output/search_results/UnansweredQuestions/dataset_code_public.json \
+		--k 10 \
+		--index_dir data/processed
 
 answer:
 	@printf "$(COLOR_CYAN)Starting answering $(COLOR_RESET)\n"
@@ -72,6 +119,7 @@ evaluate:
 		--dataset_type code \
 		--repo_path . \
 		--output_path data/eval_results_code.json
+
 debug:
 	@printf "$(COLOR_YELLOW)========================================================$(COLOR_RESET)\n"
 	@printf "$(COLOR_YELLOW)Debug mode enabled (pdb)$(COLOR_RESET)\n"
@@ -93,6 +141,9 @@ clean:
 	@rm -rf data/output
 	@rm -rf data/*.json
 	@rm -rf .venv
+	@rm -rf evaluations
+	@rm -rf \~
+	@rm -rf out.txt
 	@printf "$(COLOR_GREEN)✓ Cleanup completed$(COLOR_RESET)\n"
 
 lint:
@@ -110,22 +161,9 @@ lint:
 
 	@printf "$(COLOR_GREEN)✓ Lint completed$(COLOR_RESET)\n"
 
-lint-strict:
-	@printf "$(COLOR_MAGENTA)⚠ Strict linting$(COLOR_RESET)\n"
+exam :
+	@printf "$(COLOR_CYAN)Running exam...$(COLOR_RESET)\n"
+	@./exams/scripts/exam_retrieval.sh  --student-path . --moulinette-path ./moulinette/moulinette
 
-	@printf "$(COLOR_CYAN)Running Flake8...$(COLOR_RESET)\n"
-	@uv run python -m flake8 $(SRC_DIR)/ && \
-		printf "$(COLOR_GREEN)✓ $(COLOR_CYAN)Flake8$(COLOR_GREEN) [OK]$(COLOR_RESET)\n"
-
-	@printf "$(COLOR_CYAN)Running Mypy...$(COLOR_RESET)\n"
-	@uv run python -m mypy $(SRC_DIR) --strict && \
-		printf "$(COLOR_GREEN)✓ $(COLOR_CYAN)Mypy strict$(COLOR_GREEN) [OK]$(COLOR_RESET)\n"
-
-	@printf "$(COLOR_GREEN)✓ Strict verification completed$(COLOR_RESET)\n"
-
-test:
-	@printf "$(COLOR_CYAN)Running tests...$(COLOR_RESET)\n"
-	@./moulinette/moulinette-ubuntu evaluate_student_search_results data/output/search_results/dataset_docs_public.json datasets_public/public/AnsweredQuestions/dataset_docs_public.json --k 5 --max_context_length 1000 --threshold 0.80 
-
-.PHONY: all install run debug clean re lint lint-strict test index search answer evaluate
+.PHONY: all install run debug clean re lint  index search answer evaluate ollama-start ollama-pull server exam
 

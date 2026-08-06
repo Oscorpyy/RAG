@@ -6,34 +6,41 @@ L'index est chargé via l'API native de bm25s (BM25.load) depuis le
 dossier `data/processed` — aucun pickle, aucun fichier fait main.
 
 Usage CLI (via Fire) :
-    python -m student search_dataset \\
+    python -m student search_dataset \
         --dataset_path=datasets_public/public/UnansweredQuestions/\
-dataset_docs_public.json \\
-        --output_path=data/results_docs.json \\
+dataset_docs_public.json \
+        --output_path=data/results_docs.json \
         --k=5
 
-    python -m student search_dataset \\
+    python -m student search_dataset \
         --dataset_path=datasets_public/public/UnansweredQuestions/\
-dataset_code_public.json \\
-        --output_path=data/results_code.json \\
+dataset_code_public.json \
+        --output_path=data/results_code.json \
         --k=10
 
-    python -m student search \\
-        --query="how does vllm schedule requests" \\
+    python -m student search \
+        --query="how does vllm schedule requests" \
         --k=5
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-
 from typing import Any
+
 import bm25s
+import ollama
 from tqdm import tqdm
 
+from .ingestion import BM25_K1, BM25_B, tokenize_query
 from .models import (
     MinimalSearchResults,
     MinimalSource,
@@ -61,8 +68,12 @@ DEFAULT_INDEX_DIR: str = str(
     PROJECT_ROOT / "data" / "processed"
 )
 DEFAULT_K: int = 5
-DEFAULT_SEARCH_OUTPUT_DIR: str = str(
-    PROJECT_ROOT / "data" / "output" / "search_results"
+DEFAULT_SEARCH_OUTPUT_DIR: str = (
+    "data/output/search_results/UnansweredQuestions"
+)
+DEFAULT_SEARCH_DATASET_OUTPUT_PATH: str = (
+    "data/output/search_results/UnansweredQuestions/"
+    "dataset_docs_public.json"
 )
 DEFAULT_DOCS_DATASET_PATH: str = (
     "datasets_public/public/UnansweredQuestions/"
@@ -72,6 +83,52 @@ DEFAULT_CODE_DATASET_PATH: str = (
     "datasets_public/public/UnansweredQuestions/"
     "dataset_code_public.json"
 )
+
+# Ollama settings for query expansion
+DEFAULT_EXPANSION_MODEL: str = "qwen3:0.6b"
+DEFAULT_OLLAMA_HOST: str = "http://localhost:11434"
+
+LOCAL_QUERY_EXPANSION_TERMS: dict[str, tuple[str, ...]] = {
+    "scheduler": ("schedule", "dispatch", "queue", "batch"),
+    "schedule": ("scheduler", "dispatch", "queue", "batch"),
+    "request": ("requests", "prompt", "token", "batch"),
+    "requests": ("request", "prompt", "token", "batch"),
+    "batch": ("batching", "request", "queue", "prefill"),
+    "prefill": ("decode", "token", "kv", "cache"),
+    "decode": ("prefill", "token", "generation"),
+    "cache": ("kv", "memory", "block"),
+    "token": ("tokens", "sampling", "vocab"),
+    "gpu": ("cuda", "device", "kernel"),
+    "cuda": ("gpu", "device", "kernel"),
+    "model": ("models", "weights", "checkpoint"),
+}
+
+LOCAL_QUERY_EXPANSION_TERMS_EXTENDED: dict[str, tuple[str, ...]] = {
+    "serve": ("serving", "server", "deploy", "endpoint"),
+    "serving": ("serve", "server", "deploy", "endpoint"),
+    "api": ("endpoint", "openai", "server", "rest"),
+    "endpoint": ("api", "route", "server"),
+    "install": ("installation", "setup", "pip", "build"),
+    "installation": ("install", "setup", "pip", "build"),
+    "deploy": ("deployment", "serve", "docker", "kubernetes"),
+    "deployment": ("deploy", "serve", "docker", "container"),
+    "docker": ("container", "image", "deployment"),
+    "quantization": ("quantize", "awq", "gptq", "fp8"),
+    "quantize": ("quantization", "awq", "gptq", "precision"),
+    "parallel": ("parallelism", "distributed", "tensor", "pipeline"),
+    "parallelism": ("parallel", "distributed", "tensor", "pipeline"),
+    "distributed": ("parallel", "multi-gpu", "cluster"),
+    "lora": ("adapter", "finetune", "peft"),
+    "adapter": ("lora", "finetune", "peft"),
+    "memory": ("kv", "cache", "block", "allocation"),
+    "attention": ("kv", "paged", "flashattention"),
+    "config": ("configuration", "settings", "args", "parameters"),
+    "configuration": ("config", "settings", "args", "parameters"),
+    "engine": ("llm", "runtime", "core"),
+    "speculative": ("draft", "spec-decode", "lookahead"),
+    "multimodal": ("vision", "image", "vlm"),
+    "error": ("exception", "failure", "issue", "troubleshooting"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +140,6 @@ def normalize_file_path(raw_path: str) -> str:
     """
     Normalise le chemin de fichier pour s'assurer qu'il s'agit d'un
     chemin relatif propre commençant exactement par data/raw/...
-
-    Supprime les préfixes de chemin absolu (ex: /home/opernod/...) avec
-    .relative_to(PROJECT_ROOT) ou manipulation de chaîne.
     """
     path_obj = Path(raw_path)
     try:
@@ -136,6 +190,20 @@ def load_index(
 
     retriever = bm25s.BM25.load(str(idx_path), load_corpus=True)
 
+    indexed_k1, indexed_b = retriever.k1, retriever.b
+    if (indexed_k1, indexed_b) != (BM25_K1, BM25_B):
+        logger.warning(
+            "Index sur disque construit avec k1=%.2f b=%.2f, mais "
+            "ingestion.py définit actuellement BM25_K1=%.2f BM25_B=%.2f. "
+            "Ces constantes seules n'affectent pas un index déjà "
+            "construit — régénère l'index pour appliquer les nouvelles "
+            "valeurs (voir grid_search_k1_b()).",
+            indexed_k1, indexed_b, BM25_K1, BM25_B,
+        )
+
+    retriever.k1 = BM25_K1
+    retriever.b = BM25_B
+
     sources: list[MinimalSource] = []
 
     for doc in retriever.corpus:
@@ -146,12 +214,117 @@ def load_index(
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "Index chargé en %.2fs — %d chunks, %d termes dans le vocab",
+        "Index chargé en %.2fs — %d chunks, %d termes dans le vocab "
+        "(scores réellement calculés avec k1=%.2f, b=%.2f)",
         elapsed,
         len(sources),
         len(retriever.vocab_dict),
+        indexed_k1,
+        indexed_b,
     )
     return retriever, sources
+
+
+# ---------------------------------------------------------------------------
+# Query Expansion via Ollama
+# ---------------------------------------------------------------------------
+
+
+QUERY_EXPANSION_PROMPT = (
+    "You are a technical search assistant for the vLLM codebase "
+    "(a high-throughput LLM inference engine written in Python).\n"
+    "Given the user question below, output EXACTLY 3 short technical "
+    "keywords or synonyms (single words or hyphenated compounds) that "
+    "would help a BM25 search engine retrieve relevant source code or "
+    "documentation.\n"
+    "Rules:\n"
+    "- Output ONLY the 3 keywords separated by spaces, nothing else.\n"
+    "- Do NOT repeat words already in the question.\n"
+    "- Prefer code identifiers, class names, or domain-specific terms.\n"
+    "- Do NOT output any explanation, numbering, or punctuation.\n"
+)
+
+
+async def expand_query_async(
+    query: str,
+    model: str = DEFAULT_EXPANSION_MODEL,
+    host: str = DEFAULT_OLLAMA_HOST,
+) -> str:
+    """
+    Utilise le client Ollama asynchrone pour générer 3 mots-clés.
+    """
+    try:
+        client = ollama.AsyncClient(host=host)
+        response = await client.generate(
+            model=model,
+            system=QUERY_EXPANSION_PROMPT,
+            prompt=f"Question: {query}",
+            options={
+                "temperature": 0.0,
+                "num_predict": 32,
+                "num_ctx": 512,
+            },
+        )
+        raw = str(response["response"]).strip()
+        if "</think>" in raw:
+            raw = raw.split("</think>")[-1].strip()
+        keywords = " ".join(
+            tok for tok in raw.split()
+            if tok.replace("-", "").replace("_", "").isalnum()
+        )
+        if keywords:
+            expanded = f"{query} {keywords}"
+            logger.info(
+                "Query expansion : %r → +[%s]", query, keywords
+            )
+            return expanded
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Query expansion échouée (fallback requête originale) : %s",
+            exc,
+        )
+    return query
+
+
+def expand_query(
+    query: str,
+    model: str = DEFAULT_EXPANSION_MODEL,
+    host: str = DEFAULT_OLLAMA_HOST,
+) -> str:
+    """
+    Expansion de requête : Dictionnaire LOCAL + Appel OLLAMA (Désormais forcé).
+    """
+    expanded = _expand_query_locally_cached(query)
+
+    # OPTIMISATION : On supprime la vérification de la variable d'environnement
+    # L'appel à Ollama se fera SYSTEMATIQUEMENT pour maximiser le recall.
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            llm_expanded = pool.submit(
+                asyncio.run,
+                expand_query_async(query, model, host),
+            ).result()
+    else:
+        llm_expanded = asyncio.run(expand_query_async(query, model, host))
+
+    if llm_expanded == query:
+        return expanded
+
+    original_tokens = set(query.split())
+    llm_new_tokens = [
+        tok for tok in llm_expanded.split() if tok not in original_tokens
+    ]
+    expanded_tokens = expanded.split()
+    seen = set(expanded_tokens)
+    merged = expanded_tokens + [t for t in llm_new_tokens if t not in seen]
+    return " ".join(merged)
 
 
 # ---------------------------------------------------------------------------
@@ -164,23 +337,32 @@ def search(
     retriever: bm25s.BM25,
     sources: list[MinimalSource],
     k: int = DEFAULT_K,
+    use_expansion: bool = True,
+    corpus_documents: list[dict[str, Any]] | None = None,
 ) -> list[MinimalSource]:
+    """Recherche BM25 avec expansion de requête optionnelle."""
     query = query.strip()
     if not query:
         logger.warning("Requête vide — aucun résultat.")
         return []
 
-    query_tokens = bm25s.tokenize(
-        query, stopwords=None, return_ids=False, show_progress=False
-    )
+    if use_expansion:
+        query = expand_query(query)
+
+    query_tokens = tokenize_query(query)
+    if not query_tokens:
+        return []
 
     k_eff = min(k, len(sources))
     if k_eff == 0:
         return []
 
+    if corpus_documents is None:
+        corpus_documents = [s.model_dump() for s in sources]
+
     results, _scores = retriever.retrieve(
         query_tokens,
-        corpus=[s.model_dump() for s in sources],
+        corpus=corpus_documents,
         k=k_eff,
     )
 
@@ -236,15 +418,33 @@ def load_questions(dataset_path: str) -> list[UnansweredQuestion]:
 # ---------------------------------------------------------------------------
 
 
-def save_results(results: StudentSearchResults, output_path: str) -> None:
+def save_results(
+    results: StudentSearchResults,
+    output_path: str,
+    dataset_path: str | None = None,
+) -> None:
     out = Path(output_path)
+
+    is_directory = (
+        (out.exists() and out.is_dir())
+        or (not out.suffix and not output_path.endswith('.json'))
+    )
+
+    if is_directory:
+        if dataset_path:
+            dataset_file = Path(dataset_path).stem
+            filename = f"{dataset_file}.json"
+        else:
+            filename = "dataset_docs_public.json"
+        out = out / filename
+
     out.parent.mkdir(parents=True, exist_ok=True)
 
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(results.model_dump(by_alias=True), fh, indent=2,
                   ensure_ascii=False)
 
-    logger.info("Résultats sauvegardés → %s", out)
+    logger.info("Saved student_search_results to %s", out)
 
 
 def _search_dataset_to_path(
@@ -274,22 +474,39 @@ def run_search_dataset(
     sources: list[MinimalSource],
     k: int = DEFAULT_K,
 ) -> StudentSearchResults:
-    search_results: list[MinimalSearchResults] = []
+    corpus_documents = [source.model_dump() for source in sources]
 
-    for question in tqdm(questions, desc="Recherche", unit="q"):
+    def _search_one(question: UnansweredQuestion) -> MinimalSearchResults:
         try:
-            top_sources = search(question.question, retriever, sources, k)
+            top_sources = search(
+                question.question,
+                retriever,
+                sources,
+                k,
+                corpus_documents=corpus_documents,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Échec pour question_id=%s : %s", question.question_id, exc
+                "Échec pour question_id=%s : %s",
+                question.question_id,
+                exc,
             )
             top_sources = []
 
-        search_results.append(
-            MinimalSearchResults(
-                question_id=question.question_id,
-                question_str=question.question,
-                retrieved_sources=top_sources,
+        return MinimalSearchResults(
+            question_id=question.question_id,
+            question_str=question.question,
+            retrieved_sources=top_sources,
+        )
+
+    max_workers = max(1, min(8, (os.cpu_count() or 1)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        search_results = list(
+            tqdm(
+                executor.map(_search_one, questions),
+                total=len(questions),
+                desc="Recherche",
+                unit="q",
             )
         )
 
@@ -309,6 +526,7 @@ class Retriever:
     ) -> None:
         self._retriever = retriever
         self._sources = sources
+        self._corpus_documents = [source.model_dump() for source in sources]
 
     @classmethod
     def from_disk(cls, index_dir: str = DEFAULT_INDEX_DIR) -> "Retriever":
@@ -316,14 +534,25 @@ class Retriever:
         return cls(retriever, sources)
 
     def search(self, query: str, k: int = DEFAULT_K) -> list[MinimalSource]:
-        return search(query, self._retriever, self._sources, k)
+        return search(
+            query,
+            self._retriever,
+            self._sources,
+            k,
+            corpus_documents=self._corpus_documents,
+        )
 
     def search_dataset(
         self,
         questions: list[UnansweredQuestion],
         k: int = DEFAULT_K,
     ) -> StudentSearchResults:
-        return run_search_dataset(questions, self._retriever, self._sources, k)
+        return run_search_dataset(
+            questions,
+            self._retriever,
+            self._sources,
+            k,
+        )
 
     @property
     def corpus_size(self) -> int:
@@ -332,6 +561,149 @@ class Retriever:
     @property
     def vocab_size(self) -> int:
         return len(self._retriever.vocab_dict)
+
+
+# ---------------------------------------------------------------------------
+# Grid search k1/b sur un jeu d'évaluation étiqueté
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BM25EvalExample:
+    query: str
+    relevant_chunk_ids: list[str]
+
+
+def chunk_id_for(source: MinimalSource) -> str:
+    return (
+        f"{source.file_path}:"
+        f"{source.first_character_index}-{source.last_character_index}"
+    )
+
+
+def load_eval_set(path: str) -> list[BM25EvalExample]:
+    with open(path, encoding="utf-8") as fh:
+        raw = json.load(fh)
+    return [
+        BM25EvalExample(
+            query=item["query"],
+            relevant_chunk_ids=list(item["relevant_chunk_ids"]),
+        )
+        for item in raw
+    ]
+
+
+def recall_at_k(
+    retrieved: list[MinimalSource],
+    relevant_chunk_ids: set[str],
+    k: int,
+) -> float:
+    if not relevant_chunk_ids:
+        return 0.0
+    hit_ids = {chunk_id_for(src) for src in retrieved[:k]}
+    return len(hit_ids & relevant_chunk_ids) / len(relevant_chunk_ids)
+
+
+def _read_chunk_text(source: MinimalSource) -> str | None:
+    full_path = PROJECT_ROOT / source.file_path
+    try:
+        text = full_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    return text[source.first_character_index:source.last_character_index]
+
+
+def grid_search_k1_b(
+    sources: list[MinimalSource],
+    eval_set: list[BM25EvalExample],
+    k1_values: tuple[float, ...] = (1.2, 1.5, 1.8, 2.0),
+    b_values: tuple[float, ...] = (0.3, 0.5, 0.75, 0.9),
+    k: int = DEFAULT_K,
+    method: str = "lucene",
+    use_stemmer: bool = True,
+) -> list[dict[str, Any]]:
+    logger.info(
+        "Reconstruction du texte des %d chunks depuis le disque…",
+        len(sources),
+    )
+    texts: list[str] = []
+    valid_sources: list[MinimalSource] = []
+    for src in sources:
+        text = _read_chunk_text(src)
+        if text:
+            texts.append(text)
+            valid_sources.append(src)
+
+    skipped = len(sources) - len(valid_sources)
+    if skipped:
+        logger.warning(
+            "%d chunk(s) ignoré(s) — fichier source introuvable depuis "
+            "%s (chemins relatifs à PROJECT_ROOT).",
+            skipped, PROJECT_ROOT,
+        )
+    if not texts:
+        raise RuntimeError(
+            "Aucun texte de chunk n'a pu être reconstruit — vérifie "
+            f"que les fichiers sources sont accessibles depuis "
+            f"{PROJECT_ROOT} (data/raw/...)."
+        )
+
+    stemmer = None
+    if use_stemmer:
+        try:
+            import Stemmer as _Stemmer
+
+            stemmer = _Stemmer.Stemmer("english")
+        except ImportError:
+            logger.warning(
+                "PyStemmer non installé — grid search sans stemming "
+                "(pip install PyStemmer pour l'activer)."
+            )
+
+    corpus_tokens = bm25s.tokenize(texts, stopwords="en", stemmer=stemmer)
+    query_tokens_by_example = [
+        bm25s.tokenize(ex.query, stopwords="en", stemmer=stemmer)
+        for ex in eval_set
+    ]
+
+    k_eff = min(k, len(valid_sources))
+    if k_eff == 0:
+        raise RuntimeError("Corpus vide après reconstruction du texte.")
+
+    results: list[dict[str, Any]] = []
+    for k1 in k1_values:
+        for b in b_values:
+            retriever = bm25s.BM25(k1=k1, b=b, method=method)
+            retriever.index(corpus_tokens)
+
+            recalls: list[float] = []
+            for ex, q_tokens in zip(eval_set, query_tokens_by_example):
+                if not ex.relevant_chunk_ids:
+                    continue
+                top_ids, _ = retriever.retrieve(q_tokens, k=k_eff)
+                retrieved_sources = [
+                    valid_sources[i] for i in top_ids[0].tolist()
+                ]
+                recalls.append(
+                    recall_at_k(
+                        retrieved_sources, set(ex.relevant_chunk_ids), k_eff
+                    )
+                )
+
+            mean_recall = sum(recalls) / len(recalls) if recalls else 0.0
+            results.append({
+                "k1": k1,
+                "b": b,
+                "method": method,
+                f"recall@{k}": round(mean_recall, 4),
+                "n_queries": len(recalls),
+            })
+            logger.info(
+                "k1=%.2f b=%.2f → recall@%d=%.4f", k1, b, k, mean_recall,
+            )
+
+    results.sort(key=lambda r: r[f"recall@{k}"], reverse=True)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +745,7 @@ class RetrievalCLI:
     def search_dataset(
         self,
         dataset_path: str,
-        output_path: str,
+        save_directory: str = DEFAULT_SEARCH_DATASET_OUTPUT_PATH,
         k: int = DEFAULT_K,
         index_dir: str = DEFAULT_INDEX_DIR,
     ) -> None:
@@ -387,15 +759,17 @@ class RetrievalCLI:
             return
 
         results = retriever.search_dataset(questions, k)
-        save_results(results, output_path)
+        save_results(results, save_directory, dataset_path)
 
         total = time.perf_counter() - t_start
         per_q_ms = (total / len(questions)) * 1000
 
+        print(f"Saved student_search_results to {save_directory}")
+
         print("\n✅ Recherche batch terminée")
         print(f"   Questions traitées   : {len(questions)}")
         print(f"   k (résultats/question): {k}")
-        print(f"   Fichier de sortie    : {output_path}")
+        print(f"   Fichier de sortie    : {save_directory}")
         print(f"   Durée totale         : {total:.2f}s")
         print(f"   Moyenne / question   : {per_q_ms:.1f} ms")
 
@@ -403,14 +777,14 @@ class RetrievalCLI:
         self,
         k: int = DEFAULT_K,
         index_dir: str = DEFAULT_INDEX_DIR,
-        output_dir: str = DEFAULT_SEARCH_OUTPUT_DIR,
+        save_directory: str = DEFAULT_SEARCH_OUTPUT_DIR,
         docs_dataset_path: str = DEFAULT_DOCS_DATASET_PATH,
         code_dataset_path: str = DEFAULT_CODE_DATASET_PATH,
     ) -> None:
         t_start = time.perf_counter()
         retriever = Retriever.from_disk(index_dir)
 
-        output_root = Path(output_dir)
+        output_root = Path(save_directory)
         output_root.mkdir(parents=True, exist_ok=True)
 
         docs_output_path = output_root / "dataset_docs_public.json"
@@ -437,3 +811,67 @@ class RetrievalCLI:
         print(f"   Docs : {docs_output_path}")
         print(f"   Code : {code_output_path}")
         print(f"   Durée totale : {elapsed:.2f}s")
+
+    def tune_bm25(
+        self,
+        eval_path: str,
+        index_dir: str = DEFAULT_INDEX_DIR,
+        k: int = DEFAULT_K,
+        k1_values: str = "1.2,1.5,1.8,2.0",
+        b_values: str = "0.3,0.5,0.75,0.9",
+        method: str = "lucene",
+    ) -> None:
+        _, sources = load_index(index_dir)
+        eval_set = load_eval_set(eval_path)
+        k1_list = tuple(float(x) for x in k1_values.split(","))
+        b_list = tuple(float(x) for x in b_values.split(","))
+
+        print(
+            f"\n🔬 Grid search k1/b — {len(eval_set)} requêtes "
+            f"étiquetées, {len(k1_list)}×{len(b_list)} combinaisons\n"
+        )
+
+        results = grid_search_k1_b(
+            sources, eval_set, k1_values=k1_list, b_values=b_list,
+            k=k, method=method,
+        )
+
+        print(f"📊 Top combinaisons (recall@{k}) :\n")
+        for row in results[:5]:
+            print(
+                f"   k1={row['k1']:.2f}  b={row['b']:.2f}  "
+                f"recall@{k}={row[f'recall@{k}']:.4f}  "
+                f"({row['n_queries']} requêtes évaluées)"
+            )
+
+
+@lru_cache(maxsize=1024)
+def _expand_query_locally_cached(query: str) -> str:
+    """Expansion locale ultra-rapide sans appel réseau."""
+    tokenized_query = tokenize_query(query)
+    if not tokenized_query:
+        return query
+
+    query_tokens = [
+        token for token_group in tokenized_query for token in token_group
+    ]
+    if not query_tokens:
+        return query
+
+    # OPTIMISATION : On force les termes étendus pour ratisser plus large !
+    active_terms = {
+        **LOCAL_QUERY_EXPANSION_TERMS,
+        **LOCAL_QUERY_EXPANSION_TERMS_EXTENDED,
+    }
+
+    expanded_terms: list[str] = []
+    seen = set(query_tokens)
+    for token in query_tokens:
+        for synonym in active_terms.get(token, ()):
+            if synonym not in seen:
+                expanded_terms.append(synonym)
+                seen.add(synonym)
+
+    if not expanded_terms:
+        return query
+    return " ".join(query_tokens + expanded_terms)

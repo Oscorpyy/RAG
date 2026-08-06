@@ -4,8 +4,8 @@ Phase d'ingestion : parsing, chunking et indexation BM25 de fichiers
 Python/Markdown.
 
 Usage CLI (via Fire) :
-    python -m student index --repo_path=./vllm --max_chunk_size=2000
-    python -m student index --repo_path=./vllm --max_chunk_size=2000 \\
+    python -m student index --max_chunk_size=2000
+    python -m student index --max_chunk_size=2000 \
         --overlap=200 --index_dir=data/processed
 """
 
@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from typing import Generator, Iterator, cast
 import bm25s
+import Stemmer
 
 from .models import MinimalSource
 
@@ -36,9 +37,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DEFAULT_MAX_CHUNK_SIZE: int = 2000
-DEFAULT_OVERLAP: int = 200
+DEFAULT_OVERLAP: int = 150
 SUPPORTED_EXTENSIONS: tuple[str, ...] = (".py", ".md")
 DEFAULT_INDEX_DIR: str = "data/processed"
+
+# BM25 tuning — k1 controls term-frequency saturation, b controls
+# document-length normalisation.  For *code search* we keep k1 at the
+# default (1.5) so repeated identifiers still boost relevance, and we
+# lower b to 0.5 because source files vary wildly in length yet a long
+# file is not inherently less relevant than a short one.
+BM25_K1: float = 1.5
+BM25_B: float = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +243,18 @@ def _iter_python_chunks(
         end_line = getattr(node, "end_lineno", None)
         if start_line is None or end_line is None:
             return None
+
+        # Inclure les lignes des décorateurs pour conserver le contexte
+        # des fonctions/classes
+        if hasattr(node, "decorator_list") and getattr(node, "decorator_list"):
+            dec_lines = [
+                d.lineno
+                for d in getattr(node, "decorator_list")
+                if hasattr(d, "lineno")
+            ]
+            if dec_lines:
+                start_line = min(start_line, min(dec_lines))
+
         start_char = line_offsets[start_line - 1]
         end_char = line_offsets[end_line]
         return start_char, end_char
@@ -355,15 +376,20 @@ def parse_file(
 
 
 def _tokenize_corpus(texts: list[str]) -> bm25s.tokenization.Tokenized:
-    return bm25s.tokenize(texts, stopwords=None, show_progress=False)
+    stemmer = Stemmer.Stemmer("english")
+    return bm25s.tokenize(
+        texts, stopwords="english", stemmer=stemmer, show_progress=False
+    )
 
 
 def tokenize_query(query: str | list[str]) -> list[list[str]]:
+    stemmer = Stemmer.Stemmer("english")
     return cast(
         list[list[str]],
         bm25s.tokenize(
             query,
-            stopwords=None,
+            stopwords="english",
+            stemmer=stemmer,
             return_ids=False,
             show_progress=False,
         ),
@@ -387,7 +413,7 @@ def build_and_save_index(
 
     corpus_tokens = _tokenize_corpus(texts)
 
-    retriever = bm25s.BM25()
+    retriever = bm25s.BM25(k1=BM25_K1, b=BM25_B)
     retriever.index(corpus_tokens, show_progress=False)
 
     Path(index_dir).mkdir(parents=True, exist_ok=True)
@@ -421,13 +447,16 @@ def load_index(
 class IngestionCLI:
     def index(
         self,
-        repo_path: str,
+        repo_path: str = "./data/raw/",
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
         overlap: int | None = None,
         index_dir: str = DEFAULT_INDEX_DIR,
     ) -> None:
+        
+        # OPTIMISATION : On fixe l'overlap par défaut à 25% du chunk size.
+        # Cela garantit un très grand chevauchement pour ne rater aucun contexte.
         if overlap is None:
-            overlap = max_chunk_size // 10
+            overlap = max_chunk_size // 4
 
         if max_chunk_size < 10:
             raise ValueError(
