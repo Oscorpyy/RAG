@@ -82,13 +82,13 @@ search:
 	@echo "$(COLOR_MAGENTA)Searching Docs dataset...$(COLOR_RESET)"
 	@uv run python -m src search_dataset \
 		--dataset_path datasets_public/public/UnansweredQuestions/dataset_docs_public.json \
-		--save_directory data/output/search_results/UnansweredQuestions/dataset_docs_public.json \
+		--save_directory data/output/search_results/dataset_docs_public.json \
 		--k 10 \
 		--index_dir data/processed
 	@echo "$(COLOR_MAGENTA)Searching Code dataset...$(COLOR_RESET)"
 	@uv run python -m src search_dataset \
 		--dataset_path datasets_public/public/UnansweredQuestions/dataset_code_public.json \
-		--save_directory data/output/search_results/UnansweredQuestions/dataset_code_public.json \
+		--save_directory data/output/search_results/dataset_code_public.json \
 		--k 10 \
 		--index_dir data/processed
 

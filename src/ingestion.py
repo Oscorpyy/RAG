@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Generator, Iterator, cast
@@ -374,20 +375,62 @@ def parse_file(
 # Tokeniseur
 # ---------------------------------------------------------------------------
 
+STOP_PATH_WORDS: set[str] = {
+    "data", "raw", "vllm", "vllm-0.10.1", "docs", "src", "py", "md",
+    "txt", "json", "10", "0"
+}
+
+
+def preprocess_text_for_bm25(text: str, file_path: str = "") -> str:
+    """
+    Pré-traite le texte et le chemin de fichier pour BM25 en étendant
+    les identifiants (snake_case, camelCase, mots avec tirets) et en
+    intégrant les mots clés du chemin.
+    """
+    def expand_identifier(match: re.Match[str]) -> str:
+        val = match.group(0)
+        sub1 = val.replace("_", " ").replace("-", " ")
+        sub2 = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", val)
+        return f"{val} {sub1} {sub2}"
+
+    exp_text = re.sub(r"\b[a-zA-Z0-9_-]{3,}\b", expand_identifier, text)
+
+    if file_path:
+        raw_path_tokens = re.findall(r"[a-zA-Z0-9_-]+", file_path)
+        path_words = [
+            tok for tok in raw_path_tokens
+            if tok.lower() not in STOP_PATH_WORDS
+        ]
+        if path_words:
+            path_str = " ".join(path_words)
+            exp_path = re.sub(
+                r"\b[a-zA-Z0-9_-]{3,}\b", expand_identifier, path_str
+            )
+            # Ponderer les termes du chemin en les répétant 3 fois
+            return f"{exp_path} {exp_path} {exp_path}\n{exp_text}"
+
+    return exp_text
+
 
 def _tokenize_corpus(texts: list[str]) -> bm25s.tokenization.Tokenized:
     stemmer = Stemmer.Stemmer("english")
+    proc_texts = [preprocess_text_for_bm25(t) for t in texts]
     return bm25s.tokenize(
-        texts, stopwords="english", stemmer=stemmer, show_progress=False
+        proc_texts, stopwords="english", stemmer=stemmer, show_progress=False
     )
 
 
 def tokenize_query(query: str | list[str]) -> list[list[str]]:
     stemmer = Stemmer.Stemmer("english")
+    proc_query: str | list[str]
+    if isinstance(query, str):
+        proc_query = preprocess_text_for_bm25(query)
+    else:
+        proc_query = [preprocess_text_for_bm25(q) for q in query]
     return cast(
         list[list[str]],
         bm25s.tokenize(
-            query,
+            proc_query,
             stopwords="english",
             stemmer=stemmer,
             return_ids=False,
@@ -406,12 +449,18 @@ def build_and_save_index(
     index_dir: str,
 ) -> None:
     sources: list[MinimalSource] = [src for src, _ in chunks]
-    texts: list[str] = [text for _, text in chunks]
+    texts: list[str] = [
+        preprocess_text_for_bm25(text, file_path=src.file_path)
+        for src, text in chunks
+    ]
 
     logger.info("Tokenisation de %d chunks pour BM25…", len(texts))
     t0 = time.perf_counter()
 
-    corpus_tokens = _tokenize_corpus(texts)
+    stemmer = Stemmer.Stemmer("english")
+    corpus_tokens = bm25s.tokenize(
+        texts, stopwords="english", stemmer=stemmer, show_progress=False
+    )
 
     retriever = bm25s.BM25(k1=BM25_K1, b=BM25_B)
     retriever.index(corpus_tokens, show_progress=False)
@@ -452,9 +501,8 @@ class IngestionCLI:
         overlap: int | None = None,
         index_dir: str = DEFAULT_INDEX_DIR,
     ) -> None:
-        
         # OPTIMISATION : On fixe l'overlap par défaut à 25% du chunk size.
-        # Cela garantit un très grand chevauchement pour ne rater aucun contexte.
+        # Cela garantit un très grand chevauchement.
         if overlap is None:
             overlap = max_chunk_size // 4
 

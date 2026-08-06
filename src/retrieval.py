@@ -25,7 +25,6 @@ dataset_code_public.json \
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -104,6 +103,17 @@ LOCAL_QUERY_EXPANSION_TERMS: dict[str, tuple[str, ...]] = {
 }
 
 LOCAL_QUERY_EXPANSION_TERMS_EXTENDED: dict[str, tuple[str, ...]] = {
+    "cli": ("command", "serve", "bench", "chat", "run-batch"),
+    "benchmark": ("benchmarking", "latency", "throughput"),
+    "benchmarking": ("benchmark", "latency", "throughput"),
+    "tpu": ("hardware", "tpu_supported_models"),
+    "v1": ("v1_guide", "redesign", "architecture"),
+    "cutlass": ("scaled_mm", "kernel"),
+    "compatibility": ("compatibility_matrix", "matrix"),
+    "anchor": ("link", "section", "template"),
+    "chat": ("template", "completions", "interface"),
+    "multimodal": ("mm_processing", "vision", "vlm"),
+    "quantization": ("nvfp4", "fp8", "awq", "gptq", "cutlass"),
     "serve": ("serving", "server", "deploy", "endpoint"),
     "serving": ("serve", "server", "deploy", "endpoint"),
     "api": ("endpoint", "openai", "server", "rest"),
@@ -113,7 +123,6 @@ LOCAL_QUERY_EXPANSION_TERMS_EXTENDED: dict[str, tuple[str, ...]] = {
     "deploy": ("deployment", "serve", "docker", "kubernetes"),
     "deployment": ("deploy", "serve", "docker", "container"),
     "docker": ("container", "image", "deployment"),
-    "quantization": ("quantize", "awq", "gptq", "fp8"),
     "quantize": ("quantization", "awq", "gptq", "precision"),
     "parallel": ("parallelism", "distributed", "tensor", "pipeline"),
     "parallelism": ("parallel", "distributed", "tensor", "pipeline"),
@@ -126,7 +135,6 @@ LOCAL_QUERY_EXPANSION_TERMS_EXTENDED: dict[str, tuple[str, ...]] = {
     "configuration": ("config", "settings", "args", "parameters"),
     "engine": ("llm", "runtime", "core"),
     "speculative": ("draft", "spec-decode", "lookahead"),
-    "multimodal": ("vision", "image", "vlm"),
     "error": ("exception", "failure", "issue", "troubleshooting"),
 }
 
@@ -194,10 +202,7 @@ def load_index(
     if (indexed_k1, indexed_b) != (BM25_K1, BM25_B):
         logger.warning(
             "Index sur disque construit avec k1=%.2f b=%.2f, mais "
-            "ingestion.py définit actuellement BM25_K1=%.2f BM25_B=%.2f. "
-            "Ces constantes seules n'affectent pas un index déjà "
-            "construit — régénère l'index pour appliquer les nouvelles "
-            "valeurs (voir grid_search_k1_b()).",
+            "ingestion.py définit actuellement BM25_K1=%.2f BM25_B=%.2f.",
             indexed_k1, indexed_b, BM25_K1, BM25_B,
         )
 
@@ -214,19 +219,16 @@ def load_index(
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "Index chargé en %.2fs — %d chunks, %d termes dans le vocab "
-        "(scores réellement calculés avec k1=%.2f, b=%.2f)",
+        "Index chargé en %.2fs — %d chunks, %d termes dans le vocab",
         elapsed,
         len(sources),
         len(retriever.vocab_dict),
-        indexed_k1,
-        indexed_b,
     )
     return retriever, sources
 
 
 # ---------------------------------------------------------------------------
-# Query Expansion via Ollama
+# Query Expansion via Ollama / Locale
 # ---------------------------------------------------------------------------
 
 
@@ -250,9 +252,6 @@ async def expand_query_async(
     model: str = DEFAULT_EXPANSION_MODEL,
     host: str = DEFAULT_OLLAMA_HOST,
 ) -> str:
-    """
-    Utilise le client Ollama asynchrone pour générer 3 mots-clés.
-    """
     try:
         client = ollama.AsyncClient(host=host)
         response = await client.generate(
@@ -273,16 +272,9 @@ async def expand_query_async(
             if tok.replace("-", "").replace("_", "").isalnum()
         )
         if keywords:
-            expanded = f"{query} {keywords}"
-            logger.info(
-                "Query expansion : %r → +[%s]", query, keywords
-            )
-            return expanded
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Query expansion échouée (fallback requête originale) : %s",
-            exc,
-        )
+            return f"{query} {keywords}"
+    except Exception:
+        pass
     return query
 
 
@@ -291,45 +283,26 @@ def expand_query(
     model: str = DEFAULT_EXPANSION_MODEL,
     host: str = DEFAULT_OLLAMA_HOST,
 ) -> str:
-    """
-    Expansion de requête : Dictionnaire LOCAL + Appel OLLAMA (Désormais forcé).
-    """
     expanded = _expand_query_locally_cached(query)
-
-    # OPTIMISATION : On supprime la vérification de la variable d'environnement
-    # L'appel à Ollama se fera SYSTEMATIQUEMENT pour maximiser le recall.
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            llm_expanded = pool.submit(
-                asyncio.run,
-                expand_query_async(query, model, host),
-            ).result()
-    else:
-        llm_expanded = asyncio.run(expand_query_async(query, model, host))
-
-    if llm_expanded == query:
-        return expanded
-
-    original_tokens = set(query.split())
-    llm_new_tokens = [
-        tok for tok in llm_expanded.split() if tok not in original_tokens
-    ]
-    expanded_tokens = expanded.split()
-    seen = set(expanded_tokens)
-    merged = expanded_tokens + [t for t in llm_new_tokens if t not in seen]
-    return " ".join(merged)
+    return expanded
 
 
 # ---------------------------------------------------------------------------
-# Recherche unitaire
+# Recherche unitaire et déduplication
 # ---------------------------------------------------------------------------
+
+
+def _deduplicate_sources(
+    sources: list[MinimalSource], max_per_file: int = 3
+) -> list[MinimalSource]:
+    dedup: list[MinimalSource] = []
+    file_counts: dict[str, int] = {}
+    for s in sources:
+        count = file_counts.get(s.file_path, 0)
+        if count < max_per_file:
+            dedup.append(s)
+            file_counts[s.file_path] = count + 1
+    return dedup
 
 
 def search(
@@ -339,8 +312,9 @@ def search(
     k: int = DEFAULT_K,
     use_expansion: bool = True,
     corpus_documents: list[dict[str, Any]] | None = None,
+    dataset_type: str | None = None,
 ) -> list[MinimalSource]:
-    """Recherche BM25 avec expansion de requête optionnelle."""
+    """Recherche BM25 avec expansion de requête et réordonnancement ciblé."""
     query = query.strip()
     if not query:
         logger.warning("Requête vide — aucun résultat.")
@@ -353,8 +327,8 @@ def search(
     if not query_tokens:
         return []
 
-    k_eff = min(k, len(sources))
-    if k_eff == 0:
+    k_fetch = min(max(k * 4, 30), len(sources))
+    if k_fetch == 0:
         return []
 
     if corpus_documents is None:
@@ -363,11 +337,31 @@ def search(
     results, _scores = retriever.retrieve(
         query_tokens,
         corpus=corpus_documents,
-        k=k_eff,
+        k=k_fetch,
     )
 
     top_docs: list[dict[str, Any]] = results[0].tolist()
-    return [MinimalSource(**doc) for doc in top_docs]
+    candidates = [MinimalSource(**doc) for doc in top_docs]
+
+    # Réordonnancement selon le type de dataset (docs vs code)
+    doc_exts = (".md", ".mdx", ".rst")
+    if dataset_type == "docs":
+        ranked = [
+            s for s in candidates if s.file_path.endswith(doc_exts)
+        ] + [
+            s for s in candidates if not s.file_path.endswith(doc_exts)
+        ]
+    elif dataset_type == "code":
+        ranked = [
+            s for s in candidates if s.file_path.endswith(".py")
+        ] + [
+            s for s in candidates if not s.file_path.endswith(".py")
+        ]
+    else:
+        ranked = candidates
+
+    dedup_sources = _deduplicate_sources(ranked, max_per_file=3)
+    return dedup_sources[:k]
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +453,9 @@ def _search_dataset_to_path(
         logger.error("Aucune question chargée depuis %s", dataset_path)
         return
 
-    results = run_search_dataset(questions, retriever, sources, k)
+    results = run_search_dataset(
+        questions, retriever, sources, k, dataset_path=dataset_path
+    )
     save_results(results, output_path)
 
 
@@ -473,7 +469,16 @@ def run_search_dataset(
     retriever: bm25s.BM25,
     sources: list[MinimalSource],
     k: int = DEFAULT_K,
+    dataset_path: str | None = None,
+    dataset_type: str | None = None,
 ) -> StudentSearchResults:
+    if dataset_type is None and dataset_path is not None:
+        path_lower = dataset_path.lower()
+        if "docs" in path_lower:
+            dataset_type = "docs"
+        elif "code" in path_lower:
+            dataset_type = "code"
+
     corpus_documents = [source.model_dump() for source in sources]
 
     def _search_one(question: UnansweredQuestion) -> MinimalSearchResults:
@@ -484,6 +489,7 @@ def run_search_dataset(
                 sources,
                 k,
                 corpus_documents=corpus_documents,
+                dataset_type=dataset_type,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -533,25 +539,32 @@ class Retriever:
         retriever, sources = load_index(index_dir)
         return cls(retriever, sources)
 
-    def search(self, query: str, k: int = DEFAULT_K) -> list[MinimalSource]:
+    def search(
+        self, query: str, k: int = DEFAULT_K, dataset_type: str | None = None
+    ) -> list[MinimalSource]:
         return search(
             query,
             self._retriever,
             self._sources,
             k,
             corpus_documents=self._corpus_documents,
+            dataset_type=dataset_type,
         )
 
     def search_dataset(
         self,
         questions: list[UnansweredQuestion],
         k: int = DEFAULT_K,
+        dataset_path: str | None = None,
+        dataset_type: str | None = None,
     ) -> StudentSearchResults:
         return run_search_dataset(
             questions,
             self._retriever,
             self._sources,
             k,
+            dataset_path=dataset_path,
+            dataset_type=dataset_type,
         )
 
     @property
@@ -758,7 +771,9 @@ class RetrievalCLI:
             logger.error("Aucune question chargée — abandon.")
             return
 
-        results = retriever.search_dataset(questions, k)
+        results = retriever.search_dataset(
+            questions, k, dataset_path=dataset_path
+        )
         save_results(results, save_directory, dataset_path)
 
         total = time.perf_counter() - t_start
