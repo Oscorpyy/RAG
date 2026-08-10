@@ -20,7 +20,6 @@ from .evaluation import extract_segment
 from .models import (
     MinimalAnswer,
     MinimalSource,
-    StudentSearchResults,
     StudentSearchResultsAndAnswer,
 )
 from .parsing import parse_student_results
@@ -460,7 +459,7 @@ async def answer_dataset_async(
     for item, answer_str in zip(search_results_obj.search_results, answers):
         minimal_answer = MinimalAnswer(
             question_id=item.question_id,
-            question_str=item.question,
+            question=item.question,
             retrieved_sources=item.retrieved_sources,
             answer=answer_str,
         )

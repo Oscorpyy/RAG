@@ -376,15 +376,21 @@ def parse_minimal_source(data: Any) -> MinimalSource:
         else 0
     )
 
-    try:
-        first_idx_val = int(first_idx)
-    except (ValueError, TypeError):
-        first_idx_val = 0
+    first_idx_val = 0
 
-    try:
-        last_idx_val = int(last_idx)
-    except (ValueError, TypeError):
-        last_idx_val = 0
+    if first_idx is not None:
+        try:
+            first_idx_val = int(first_idx)
+        except (ValueError, TypeError):
+            pass
+
+    last_idx_val = 0
+
+    if last_idx is not None:
+        try:
+            last_idx_val = int(last_idx)
+        except (ValueError, TypeError):
+            pass
 
     return MinimalSource(
         file_path=str(file_path),
@@ -591,7 +597,7 @@ def parse_student_results(raw_data_or_path: Any) -> StudentSearchResults:
             search_results_list.append(
                 MinimalAnswer(
                     question_id=str(q_id),
-                    question_str=str(q_str),
+                    question=str(q_str),
                     retrieved_sources=parsed_sources,
                     answer=str(ans),
                 )

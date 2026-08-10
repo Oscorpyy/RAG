@@ -162,11 +162,24 @@ lint:
 
 	@printf "$(COLOR_GREEN)✓ Lint completed$(COLOR_RESET)\n"
 
-exam :
+pre_exam:
+	@printf "$(COLOR_CYAN)Running pre-exam checks...$(COLOR_RESET)\n"
+	@
+	@printf "$(COLOR_GREEN)✓ Pre-exam checks completed$(COLOR_RESET)\n"
+
+exam: pre_exam
 	@printf "$(COLOR_CYAN)Running exam...$(COLOR_RESET)\n"
 	@./exams/scripts/exam_retrieval.sh  --student-path . --moulinette-path ./moulinette/moulinette
 
-.PHONY: all install run debug clean re lint index search answer evaluate ollama-start ollama-pull server exam
+exam_answer: pre_exam
+	@printf "$(COLOR_CYAN)Running exam answer...$(COLOR_RESET)\n"
+	@./exams/scripts/exam_answer.sh  --student-path . --moulinette-path ./moulinette/moulinette
 
+exam_edge_case: pre_exam
+	@printf "$(COLOR_CYAN)Running exam edge case...$(COLOR_RESET)\n"
+	@./exams/scripts/exam_edge_cases.sh --student-path .
+
+
+.PHONY: all install run debug clean re lint index search answer evaluate ollama-start ollama-pull server pre_exam exam exam_answer exam_edge_case
 
 

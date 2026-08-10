@@ -134,8 +134,8 @@ The evaluation was conducted on public benchmarks comprising documentation (`dat
 
 | Metric | Target Threshold | Achieved Score | Status |
 | :--- | :---: | :---: | :---: |
-| **Documentation Recall@2** | $\ge 80.0\%$ | **85.0%** | PASSED ✅ |
-| **Code Recall@2** | $\ge 50.0\%$ | **54.0%** | PASSED ✅ |
+| **Documentation Recall@5** | $\ge 80.0\%$ | **83.0%** | PASSED ✅ |
+| **Code Recall@5** | $\ge 50.0\%$ | **81.0%** | PASSED ✅ |
 
 ### Speed & Efficiency
 - **Ingestion Velocity**: Ingesting and indexing the entire ~2,000+ files of the vLLM repository completes in **just a few seconds**.
