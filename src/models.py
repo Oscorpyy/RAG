@@ -30,7 +30,7 @@ class RagDataset(BaseModel):
 
 class MinimalSearchResults(BaseModel):
     question_id: str
-    question: str = Field(alias="question_str")
+    question: str
     retrieved_sources: List[MinimalSource]
 
     model_config = {

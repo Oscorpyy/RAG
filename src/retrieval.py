@@ -475,7 +475,7 @@ def run_search_dataset(
 
         return MinimalSearchResults(
             question_id=question.question_id,
-            question_str=question.question,
+            question=question.question,
             retrieved_sources=top_sources,
         )
 

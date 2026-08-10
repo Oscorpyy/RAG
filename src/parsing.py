@@ -600,7 +600,7 @@ def parse_student_results(raw_data_or_path: Any) -> StudentSearchResults:
             search_results_list.append(
                 MinimalSearchResults(
                     question_id=str(q_id),
-                    question_str=str(q_str),
+                    question=str(q_str),
                     retrieved_sources=parsed_sources,
                 )
             )
