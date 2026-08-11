@@ -173,15 +173,15 @@ pre_exam:
 	@mv moulinette-ubuntu moulinette
 	@printf "$(COLOR_GREEN)✓ Pre-exam checks completed$(COLOR_RESET)\n"
 
-exam: pre_exam
+exam:
 	@printf "$(COLOR_CYAN)Running exam...$(COLOR_RESET)\n"
 	@./exams/scripts/exam_retrieval.sh  --student-path . --moulinette-path ./moulinette
 
-exam_answer: pre_exam
+exam_answer:
 	@printf "$(COLOR_CYAN)Running exam answer...$(COLOR_RESET)\n"
 	@./exams/scripts/exam_answer.sh  --student-path . --moulinette-path ./moulinette
 
-exam_edge_case: pre_exam
+exam_edge_case:
 	@printf "$(COLOR_CYAN)Running exam edge case...$(COLOR_RESET)\n"
 	@./exams/scripts/exam_edge_cases.sh --student-path .
 
